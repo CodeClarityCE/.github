@@ -98,7 +98,8 @@ jobs:
           tags: ${{ env.TOOLCHAIN }}
           cache-from: type=gha,scope=toolchain
           cache-to: type=gha,mode=max,scope=toolchain
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      # The store only feeds these checks; release images build without any cache.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0 zizmor: ignore[cache-poisoning]
         with:
           path: ${{ runner.temp }}/pnpm-store
           key: pnpm-store-${{ hashFiles(format('{0}/pnpm-lock.yaml', inputs.working-directory)) }}
@@ -113,12 +114,12 @@ jobs:
           exec docker run --rm -u "$(id -u):$(id -g)" \
             -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" -v "$RUNNER_TEMP:$RUNNER_TEMP" \
             -w "$GITHUB_WORKSPACE/$PKG_DIR" -e HOME="$RUNNER_TEMP/ci-home" -e CI=true \
-            -e PNPM_STORE="$RUNNER_TEMP/pnpm-store" "$TOOLCHAIN" sh -ec "$1"
+            "$TOOLCHAIN" sh -ec "$1"
           EOF
           chmod +x "$RUNNER_TEMP/bin/tc"
           echo "$RUNNER_TEMP/bin" >>"$GITHUB_PATH"
       - name: pnpm install
-        run: tc 'pnpm install --frozen-lockfile --store-dir "$PNPM_STORE"'
+        run: tc "pnpm install --frozen-lockfile --store-dir $RUNNER_TEMP/pnpm-store"
       - name: Lint
         run: tc 'pnpm lint:check'
       - name: Type-check
