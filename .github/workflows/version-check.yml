@@ -17,6 +17,10 @@ on:
         description: Branch whose version the PR must exceed.
         type: string
         default: main
+      image:
+        description: Image repository, such as codeclarityce/plugin-x. Adds the image tags to the summary.
+        type: string
+        default: ""
     outputs:
       version:
         description: Version on the PR.
@@ -57,6 +61,7 @@ jobs:
           VERSION_FILE: ${{ inputs.version-file }}
           JQ_PATH: ${{ inputs.jq-path }}
           BASE: ${{ inputs.base-branch }}
+          IMAGE: ${{ inputs.image }}
         run: |
           set -euo pipefail
           file="${VERSION_FILE#./}"
@@ -69,6 +74,9 @@ jobs:
           version="$v"
           prerelease=false
           if grep -q 'alpha\|beta' <<<"$version"; then prerelease=true; fi
+          # Docker tags drop the leading v.
+          tags=""
+          if [[ -n "$IMAGE" ]]; then tags="\`$IMAGE:${version#v}\`, \`$IMAGE:latest\`"; fi
           {
             echo "version=$version"
             echo "prerelease=$prerelease"
@@ -80,6 +88,7 @@ jobs:
             {
               echo "### Version check skipped"
               echo "No \`$file\` on \`$BASE\` yet. Merging releases \`$version\` (prerelease: $prerelease)."
+              if [[ -n "$tags" ]]; then echo "Image tags: $tags"; fi
             } >>"$GITHUB_STEP_SUMMARY"
             exit 0
           fi
@@ -106,5 +115,6 @@ jobs:
             echo "| Current \`$BASE\` version | \`$previous\` |"
             echo "| Version this PR releases | \`$version\` |"
             echo "| Git tag | \`$version\` |"
+            if [[ -n "$tags" ]]; then echo "| Image tags | $tags |"; fi
             echo "| Prerelease | $prerelease |"
           } >>"$GITHUB_STEP_SUMMARY"
