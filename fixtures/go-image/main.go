@@ -4,7 +4,7 @@ package main
 import "fmt"
 
 func main() {
-	fmt.Println(greeting())
+fmt.Println( greeting() )
 }
 
 func greeting() string {
