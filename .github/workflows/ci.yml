@@ -21,9 +21,18 @@ jobs:
     with:
       working-directory: fixtures/go-library
 
+  version-vs-feature:
+    uses: $/.github/workflows/version-check.yml
+    permissions:
+      contents: read
+    with:
+      version-file: fixtures/go-library/config.json
+      base-branch: feat/ci-github-actions
+      image: codeclarityce/fixture
+
   # The required check. Called workflow jobs show as "<caller> / <job>", so this one lives here.
   ci:
-    needs: [go-library]
+    needs: [go-library, version-vs-feature]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -31,7 +40,7 @@ jobs:
     steps:
       - name: Check job results
         env:
-          RESULT: ${{ needs.go-library.result }}
+          RESULT: ${{ needs.go-library.result == 'success' && needs.version-vs-feature.result || needs.go-library.result }}
         run: |
           echo "go-library: $RESULT"
           [[ "$RESULT" == success ]] || { echo "::error::go-library did not succeed: $RESULT"; exit 1; }
