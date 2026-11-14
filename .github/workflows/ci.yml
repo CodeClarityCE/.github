@@ -1,5 +1,5 @@
-# The central repo's own CI: runs the Go library and Go image workflows against
-# their fixtures, which also lints this repo's workflows.
+# The central repo's own CI: runs the Go library, Go image and Node image workflows
+# against their fixtures, which also lints this repo's workflows.
 name: CI
 
 on:
@@ -31,9 +31,19 @@ jobs:
     with:
       working-directory: fixtures/go-image
 
+  # Same for the Node image fixture.
+  node-image:
+    uses: $/.github/workflows/node-image.yml
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    with:
+      working-directory: fixtures/node-image
+
   # The required check. Called workflow jobs show as "<caller> / <job>", so this one lives here.
   ci:
-    needs: [go-library, go-image]
+    needs: [go-library, go-image, node-image]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
