@@ -98,10 +98,10 @@ jobs:
           tags: ${{ env.TOOLCHAIN }}
           cache-from: type=gha,scope=toolchain
           cache-to: type=gha,mode=max,scope=toolchain
-      # Main pushes, which may release, do not read the cache.
+      # Main pushes, which may release, do not read the cache; zizmor can't see that.
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          lookup-only: ${{ github.ref == 'refs/heads/main' }}
+          lookup-only: ${{ github.ref == 'refs/heads/main' }} # zizmor: ignore[cache-poisoning]
           path: ${{ runner.temp }}/pnpm-store
           key: pnpm-store-${{ hashFiles(format('{0}/pnpm-lock.yaml', inputs.working-directory)) }}
           restore-keys: pnpm-store-
