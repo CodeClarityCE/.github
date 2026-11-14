@@ -21,51 +21,11 @@ jobs:
       version-file: ${{ inputs.working-directory }}/config.json
 
   checks:
-    name: go checks
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    uses: $/.github/workflows/go-checks.yml
     permissions:
       contents: read
-    # Keep in sync with the Dockerfiles and go.mod.
-    container:
-      image: golang:1.27.3@sha256:2920bb124f1a2e12a1d39f0cab756ae0068441ee1da7655dec7f5e374944095b
-    env:
-      GOTOOLCHAIN: local
-      GOPRIVATE: github.com/CodeClarityCE/*
-      MODULE_DIR: ${{ inputs.working-directory }}
-    defaults:
-      run:
-        shell: bash
-        working-directory: ${{ inputs.working-directory }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: go mod download
-        run: go mod download
-      - name: go mod tidy
-        run: |
-          go mod tidy -diff || {
-            echo "::error file=${MODULE_DIR#./}/go.mod::go.mod or go.sum is not tidy. Run go mod tidy and commit the result."
-            exit 1
-          }
-      - name: gofmt
-        run: |
-          files=$(gofmt -l .)
-          if [[ -n "$files" ]]; then
-            prefix="${MODULE_DIR#./}"; prefix="${prefix#.}"; prefix="${prefix:+${prefix%/}/}"
-            while IFS= read -r f; do
-              echo "::error file=$prefix$f::$f is not gofmt-formatted"
-            done <<<"$files"
-            echo "Run gofmt -w on the files above"
-            exit 1
-          fi
-      - name: go vet
-        run: go vet ./...
-      - name: go test
-        run: go test -v ./...
-      - name: govulncheck
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
+    with:
+      working-directory: ${{ inputs.working-directory }}
 
   lint:
     uses: $/.github/workflows/workflow-lint.yml

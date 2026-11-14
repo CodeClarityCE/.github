@@ -1,0 +1,6 @@
+{
+    "name": "fixture-go-image",
+    "version": "v0.0.1-alpha",
+    "image_name": "codeclarityce/fixture-go-image",
+    "description": "Smoke test plugin for the Go image workflow"
+}
