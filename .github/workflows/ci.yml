@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   go-library:
-    uses: ./.github/workflows/go-library.yml
+    uses: $/.github/workflows/go-library.yml
     permissions:
       contents: write
     with:

@@ -14,7 +14,7 @@ permissions: {}
 
 jobs:
   version:
-    uses: ./.github/workflows/version-check.yml
+    uses: $/.github/workflows/version-check.yml
     permissions:
       contents: read
     with:
@@ -68,7 +68,7 @@ jobs:
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
 
   lint:
-    uses: ./.github/workflows/workflow-lint.yml
+    uses: $/.github/workflows/workflow-lint.yml
     permissions:
       contents: read
 

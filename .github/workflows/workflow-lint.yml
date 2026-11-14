@@ -23,7 +23,9 @@ jobs:
           persist-credentials: false
       - name: actionlint
         run: |
+          # actionlint 1.7.12 predates the $/ self-repository syntax, so skip that one error.
           docker run --rm -v "$GITHUB_WORKSPACE:/repo" -w /repo "$ACTIONLINT_IMAGE" \
+            -ignore 'reusable workflow call "\$/' \
             -format '{{range $err := .}}::error file={{$err.Filepath}},line={{$err.Line}},col={{$err.Column}}::{{$err.Message}}%0A```%0A{{replace $err.Snippet "\\n" "%0A"}}%0A```\n{{end}}'
       - name: zizmor
         env:
