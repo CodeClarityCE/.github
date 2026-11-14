@@ -48,6 +48,15 @@ on:
       digest:
         description: Manifest list digest of the pushed image, empty unless released.
         value: ${{ jobs.merge.outputs.digest }}
+    # Optional so build-only calls need none. Read in the release environment, but
+    # each caller in the chain must still pass them by name.
+    secrets:
+      DOCKERHUB_USERNAME:
+        description: Docker Hub user that pushes the image. Release calls only.
+        required: false
+      DOCKERHUB_TOKEN:
+        description: Docker Hub access token for that user. Release calls only.
+        required: false
 
 permissions: {}
 

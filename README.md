@@ -59,7 +59,7 @@ The `Check job results` step is the one gate rule, used unchanged in every calle
 
 ### Go image repos
 
-Same as above with `go-image.yml`. Image name and version come from `config.json` (`image_name`, `version`). The release jobs also need `id-token` and `attestations`:
+Same as above with `go-image.yml`. Image name and version come from `config.json` (`image_name`, `version`). The release jobs also need `id-token` and `attestations`, and the Docker Hub secrets passed by name:
 
 ```yaml
 go:
@@ -68,13 +68,16 @@ go:
     contents: write
     id-token: write
     attestations: write
+  secrets:
+    DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+    DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
   # with:
   #   target: plugin   # Dockerfile target, the default
 ```
 
 ### Node image repos
 
-Image `codeclarityce/<name>` and version come from `package.json` (`name`, `version`); the git tag is `v<version>`. The job stages `.cloud/docker/pnpm-workspace.yaml` at the package root, builds the Dockerfile's `toolchain` target and runs each step in it with the pnpm store cached: `pnpm install --frozen-lockfile`, `pnpm lint:check`, `pnpm type-check`, the test command, the extra test command if set, and `pnpm exec prettier src --check`. Same permissions as the Go image call:
+Image `codeclarityce/<name>` and version come from `package.json` (`name`, `version`); the git tag is `v<version>`. The job stages `.cloud/docker/pnpm-workspace.yaml` at the package root, builds the Dockerfile's `toolchain` target and runs each step in it with the pnpm store cached: `pnpm install --frozen-lockfile`, `pnpm lint:check`, `pnpm type-check`, the test command, the extra test command if set, and `pnpm exec prettier src --check`. Same permissions and secrets as the Go image call:
 
 ```yaml
 node:
@@ -83,6 +86,9 @@ node:
     contents: write
     id-token: write
     attestations: write
+  secrets:
+    DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+    DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
   with:
     test-command: pnpm test # the default
     extra-test-command: pnpm test:e2e test/integration/*contract*.e2e-spec.ts
@@ -101,9 +107,11 @@ node:
 | `submodules` | `"false"`                  | checkout `submodules` value                                   |
 | `release`    | `false`                    | push and release instead of a local build                     |
 
+Secrets, both optional and needed only for `release: true`: `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`.
+
 Outputs: `tag` (such as `codeclarityce/plugin-js-sbom:0.0.26-alpha`), `released` (`true` when this run released), `digest` (manifest list digest when released).
 
-With `release: false` it builds linux/amd64 without pushing, using the GitHub Actions layer cache. With `release: true`, on a push to `main` with `CI_RELEASE` set to `true`, it skips with a summary note if the tag exists; otherwise it builds amd64 on `ubuntu-24.04` and arm64 on `ubuntu-24.04-arm` without cache, pushes each by digest, merges them into a manifest list tagged with the version and `latest`, attests build provenance on the manifest digest, and only then creates the GitHub release. The push, merge and release jobs run in the `release` environment and read `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` from it; callers pass no secrets. The caller job must grant `contents: write`, `id-token: write` and `attestations: write` even for the build-only call, since GitHub checks the skipped release jobs' permissions too.
+With `release: false` it builds linux/amd64 without pushing, using the GitHub Actions layer cache. With `release: true`, on a push to `main` with `CI_RELEASE` set to `true`, it skips with a summary note if the tag exists; otherwise it builds amd64 on `ubuntu-24.04` and arm64 on `ubuntu-24.04-arm` without cache, pushes each by digest, merges them into a manifest list tagged with the version and `latest`, attests build provenance on the manifest digest, and only then creates the GitHub release. The push, merge and release jobs run in the `release` environment, where `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` are stored. A reusable workflow only gets the secrets its caller passes, even environment secrets, so every workflow in the chain passes both by name: the repo's `ci.yml` to `go-image.yml` or `node-image.yml`, and that to `image.yml`. A secret that is not passed resolves to an empty string. Both are optional, so the build-only call to `image.yml` passes none. We pass them by name rather than with `secrets: inherit`, which zizmor flags. The caller job must grant `contents: write`, `id-token: write` and `attestations: write` even for the build-only call, since GitHub checks the skipped release jobs' permissions too.
 
 ## Releases
 
