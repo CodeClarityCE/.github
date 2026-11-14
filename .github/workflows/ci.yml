@@ -41,9 +41,20 @@ jobs:
     with:
       working-directory: fixtures/node-image
 
+  # Throwaway: version check of the Node fixture against the PR base.
+  version-vs-base:
+    uses: $/.github/workflows/version-check.yml
+    permissions:
+      contents: read
+    with:
+      version-file: fixtures/node-image/package.json
+      base-branch: ci/102-node-image
+      image: codeclarityce/fixture-node-image
+      tag-prefix: v
+
   # The required check. Called workflow jobs show as "<caller> / <job>", so this one lives here.
   ci:
-    needs: [go-library, go-image, node-image]
+    needs: [go-library, go-image, node-image, version-vs-base]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
