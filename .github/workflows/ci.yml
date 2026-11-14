@@ -1,5 +1,5 @@
-# The central repo's own CI: runs the Go library workflow against the fixture
-# module, which also lints this repo's workflows.
+# The central repo's own CI: runs the Go library and Go image workflows against
+# their fixtures, which also lints this repo's workflows.
 name: CI
 
 on:
@@ -21,9 +21,19 @@ jobs:
     with:
       working-directory: fixtures/go-library
 
+  # amd64 build only; release jobs stay skipped while CI_RELEASE is unset here.
+  go-image:
+    uses: $/.github/workflows/go-image.yml
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    with:
+      working-directory: fixtures/go-image
+
   # The required check. Called workflow jobs show as "<caller> / <job>", so this one lives here.
   ci:
-    needs: [go-library]
+    needs: [go-library, go-image]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -31,7 +41,8 @@ jobs:
     steps:
       - name: Check job results
         env:
-          RESULT: ${{ needs.go-library.result }}
+          NEEDS: ${{ toJSON(needs) }}
         run: |
-          echo "go-library: $RESULT"
-          [[ "$RESULT" == success ]] || { echo "::error::go-library did not succeed: $RESULT"; exit 1; }
+          jq -r 'to_entries[] | "\(.key): \(.value.result)"' <<<"$NEEDS"
+          bad=$(jq -r 'to_entries[] | select(.value.result != "success") | .key' <<<"$NEEDS")
+          [[ -z "$bad" ]] || { echo "::error::Did not succeed: $(tr '\n' ' ' <<<"$bad")"; exit 1; }
