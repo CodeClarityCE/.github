@@ -1,0 +1,3 @@
+node_modules/
+# Staged from .cloud/docker by CI.
+/pnpm-workspace.yaml

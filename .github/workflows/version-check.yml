@@ -21,6 +21,10 @@ on:
         description: Image repository, such as codeclarityce/plugin-x. Adds the image tags to the summary.
         type: string
         default: ""
+      tag-prefix:
+        description: Prefix of the git tag before the version, such as v for package.json versions.
+        type: string
+        default: ""
     outputs:
       version:
         description: Version on the PR.
@@ -62,6 +66,7 @@ jobs:
           JQ_PATH: ${{ inputs.jq-path }}
           BASE: ${{ inputs.base-branch }}
           IMAGE: ${{ inputs.image }}
+          TAG_PREFIX: ${{ inputs.tag-prefix }}
         run: |
           set -euo pipefail
           file="${VERSION_FILE#./}"
@@ -114,7 +119,7 @@ jobs:
             echo "|---|---|"
             echo "| Current \`$BASE\` version | \`$previous\` |"
             echo "| Version this PR releases | \`$version\` |"
-            echo "| Git tag | \`$version\` |"
+            echo "| Git tag | \`$TAG_PREFIX$version\` |"
             if [[ -n "$tags" ]]; then echo "| Image tags | $tags |"; fi
             echo "| Prerelease | $prerelease |"
           } >>"$GITHUB_STEP_SUMMARY"

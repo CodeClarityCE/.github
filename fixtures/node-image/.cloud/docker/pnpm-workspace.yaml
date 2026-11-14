@@ -1,0 +1,3 @@
+# Staged to the package root by CI, as in api and frontend.
+minimumReleaseAge: 4320
+verifyDepsBeforeRun: false

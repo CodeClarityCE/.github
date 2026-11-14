@@ -1,0 +1,135 @@
+# CI for Go image repos (plugins and services): version check, Go checks with
+# GOWORK=off, workflow lint, image build, and the gated release.
+# Callers set concurrency and the top-level ci job; see README.md.
+name: Go image
+
+on:
+  workflow_call:
+    inputs:
+      target:
+        description: Dockerfile build target.
+        type: string
+        default: plugin
+      working-directory:
+        description: Directory holding go.mod and config.json, used as the Docker build context.
+        type: string
+        default: .
+      dockerfile:
+        description: Dockerfile, relative to the working directory.
+        type: string
+        default: .cloud/docker/Dockerfile
+    # Passed on to image.yml for the release only.
+    secrets:
+      DOCKERHUB_USERNAME:
+        description: Docker Hub user that pushes the image. Needed only when releasing.
+        required: false
+      DOCKERHUB_TOKEN:
+        description: Docker Hub access token for that user. Needed only when releasing.
+        required: false
+
+permissions: {}
+
+jobs:
+  meta:
+    name: config
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      image: ${{ steps.read.outputs.image }}
+      version: ${{ steps.read.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: read
+        env:
+          CONFIG: ${{ inputs.working-directory }}/config.json
+        run: |
+          set -euo pipefail
+          image=$(jq -er .image_name "$CONFIG") || { echo "::error file=${CONFIG#./}::No image_name in config.json"; exit 1; }
+          version=$(jq -er .version "$CONFIG") || { echo "::error file=${CONFIG#./}::No version in config.json"; exit 1; }
+          {
+            echo "image=$image"
+            echo "version=$version"
+          } >>"$GITHUB_OUTPUT"
+
+  version:
+    needs: [meta]
+    uses: $/.github/workflows/version-check.yml
+    permissions:
+      contents: read
+    with:
+      version-file: ${{ inputs.working-directory }}/config.json
+      image: ${{ needs.meta.outputs.image }}
+
+  checks:
+    uses: $/.github/workflows/go-checks.yml
+    permissions:
+      contents: read
+    with:
+      working-directory: ${{ inputs.working-directory }}
+      gowork-off: true
+      submodules: recursive
+
+  lint:
+    uses: $/.github/workflows/workflow-lint.yml
+    permissions:
+      contents: read
+
+  # PRs, develop, and main while CI_RELEASE is off: amd64 build, not pushed.
+  build:
+    needs: [meta]
+    if: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.CI_RELEASE == 'true') }}
+    uses: $/.github/workflows/image.yml
+    # GitHub checks these for the skipped release jobs in image.yml too; the build job only reads.
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    with:
+      image: ${{ needs.meta.outputs.image }}
+      version: ${{ needs.meta.outputs.version }}
+      target: ${{ inputs.target }}
+      context: ${{ inputs.working-directory }}
+      dockerfile: ${{ inputs.dockerfile }}
+      submodules: recursive
+
+  release:
+    needs: [meta, checks, lint]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.CI_RELEASE == 'true'
+    uses: $/.github/workflows/image.yml
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    with:
+      image: ${{ needs.meta.outputs.image }}
+      version: ${{ needs.meta.outputs.version }}
+      target: ${{ inputs.target }}
+      context: ${{ inputs.working-directory }}
+      dockerfile: ${{ inputs.dockerfile }}
+      submodules: recursive
+      release: true
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+
+  # Fails if any needed job failed or was cancelled; skipped counts as success.
+  ci:
+    needs: [meta, version, checks, lint, build, release]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Check job results
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "results: $RESULTS"
+          if [[ " $RESULTS " == *" failure "* || " $RESULTS " == *" cancelled "* ]]; then
+            echo "::error::A needed job failed or was cancelled: $RESULTS"
+            exit 1
+          fi
