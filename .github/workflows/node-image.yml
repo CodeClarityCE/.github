@@ -98,9 +98,10 @@ jobs:
           tags: ${{ env.TOOLCHAIN }}
           cache-from: type=gha,scope=toolchain
           cache-to: type=gha,mode=max,scope=toolchain
-      # The store only feeds these checks; release images build without any cache.
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0 zizmor: ignore[cache-poisoning]
+      # Main pushes, which may release, do not read the cache.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
+          lookup-only: ${{ github.ref == 'refs/heads/main' }}
           path: ${{ runner.temp }}/pnpm-store
           key: pnpm-store-${{ hashFiles(format('{0}/pnpm-lock.yaml', inputs.working-directory)) }}
           restore-keys: pnpm-store-
