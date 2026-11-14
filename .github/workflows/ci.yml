@@ -19,7 +19,7 @@ jobs:
     permissions:
       contents: write
     with:
-      working-directory: fixtures/go-library
+      working-directory: fixtures/utility-types
 
   # The required check. Called workflow jobs show as "<caller> / <job>", so this one lives here.
   ci:
