@@ -1,5 +1,5 @@
 {
     "name": "fixture-go-library",
-    "version": "v0.0.1-alpha",
+    "version": "v0.0.2-alpha",
     "description": "Smoke test module for the Go library workflow"
 }
