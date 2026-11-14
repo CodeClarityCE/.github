@@ -63,7 +63,7 @@ jobs:
             --title "Release $version" --generate-notes --prerelease="$prerelease"
           echo "Released \`$version\` at \`$GITHUB_SHA\` (prerelease: $prerelease)." >>"$GITHUB_STEP_SUMMARY"
 
-  # Fails if any job failed or was cancelled; skipped jobs count as success.
+  # Fails if any needed job failed or was cancelled; skipped counts as success.
   ci:
     needs: [version, checks, lint, release]
     if: always()
@@ -73,11 +73,10 @@ jobs:
     steps:
       - name: Check job results
         env:
-          NEEDS: ${{ toJSON(needs) }}
+          RESULTS: ${{ join(needs.*.result, ' ') }}
         run: |
-          bad=$(jq -r 'to_entries[] | select(.value.result == "failure" or .value.result == "cancelled") | "\(.key): \(.value.result)"' <<<"$NEEDS")
-          if [[ -n "$bad" ]]; then
-            echo "::error::Jobs did not succeed: $(tr '\n' ' ' <<<"$bad")"
+          echo "results: $RESULTS"
+          if [[ " $RESULTS " == *" failure "* || " $RESULTS " == *" cancelled "* ]]; then
+            echo "::error::A needed job failed or was cancelled: $RESULTS"
             exit 1
           fi
-          jq -r 'to_entries[] | "\(.key): \(.value.result)"' <<<"$NEEDS"

@@ -83,7 +83,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # pnpm reads minimumReleaseAge and allowBuilds from here, as in Jenkins.
+      # pnpm reads minimumReleaseAge and allowBuilds from pnpm-workspace.yaml at the package root.
       - name: Stage pnpm config
         working-directory: ${{ inputs.working-directory }}
         run: cp .cloud/docker/pnpm-workspace.yaml pnpm-workspace.yaml
@@ -105,11 +105,11 @@ jobs:
           path: ${{ runner.temp }}/pnpm-store
           key: pnpm-store-${{ hashFiles(format('{0}/pnpm-lock.yaml', inputs.working-directory)) }}
           restore-keys: pnpm-store-
-      # tc runs a command in the toolchain container as the runner user, like Jenkins' inToolchain.
+      # toolchain-run runs a shell command in the toolchain container as the runner user.
       - name: Set up toolchain runner
         run: |
           mkdir -p "$RUNNER_TEMP/bin" "$RUNNER_TEMP/ci-home" "$RUNNER_TEMP/pnpm-store"
-          cat >"$RUNNER_TEMP/bin/tc" <<'EOF'
+          cat >"$RUNNER_TEMP/bin/toolchain-run" <<'EOF'
           #!/usr/bin/env bash
           set -euo pipefail
           exec docker run --rm -u "$(id -u):$(id -g)" \
@@ -117,29 +117,29 @@ jobs:
             -w "$GITHUB_WORKSPACE/$PKG_DIR" -e HOME="$RUNNER_TEMP/ci-home" -e CI=true \
             "$TOOLCHAIN" sh -ec "$1"
           EOF
-          chmod +x "$RUNNER_TEMP/bin/tc"
+          chmod +x "$RUNNER_TEMP/bin/toolchain-run"
           echo "$RUNNER_TEMP/bin" >>"$GITHUB_PATH"
       - name: pnpm install
-        run: tc "pnpm install --frozen-lockfile --store-dir $RUNNER_TEMP/pnpm-store"
+        run: toolchain-run "pnpm install --frozen-lockfile --store-dir $RUNNER_TEMP/pnpm-store"
       - name: Lint
-        run: tc 'pnpm lint:check'
+        run: toolchain-run 'pnpm lint:check'
       - name: Type-check
-        run: tc 'pnpm type-check'
+        run: toolchain-run 'pnpm type-check'
       - name: Unit tests
         env:
           CMD: ${{ inputs.test-command }}
-        run: tc "$CMD"
+        run: toolchain-run "$CMD"
       - name: Extra tests
         if: inputs.extra-test-command != ''
         env:
           CMD: ${{ inputs.extra-test-command }}
-        run: tc "$CMD"
+        run: toolchain-run "$CMD"
       - name: Prettier
         # Runs even when the tests fail, so formatting is reported too.
         if: ${{ !cancelled() }}
         run: |
           set +e
-          out=$(tc 'pnpm exec prettier src --check --no-color' 2>&1)
+          out=$(toolchain-run 'pnpm exec prettier src --check --no-color' 2>&1)
           status=$?
           echo "$out"
           if [[ $status != 0 ]]; then
@@ -161,7 +161,7 @@ jobs:
     needs: [meta]
     if: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.CI_RELEASE == 'true') }}
     uses: $/.github/workflows/image.yml
-    # A ceiling for the skipped release jobs in image.yml; the build job itself reads only.
+    # GitHub checks these for the skipped release jobs in image.yml too; the build job only reads.
     permissions:
       contents: write
       id-token: write
@@ -189,7 +189,7 @@ jobs:
       dockerfile: ${{ inputs.dockerfile }}
       release: true
 
-  # Fails if any job failed or was cancelled; skipped jobs count as success.
+  # Fails if any needed job failed or was cancelled; skipped counts as success.
   ci:
     needs: [meta, version, checks, lint, build, release]
     if: always()
@@ -199,11 +199,10 @@ jobs:
     steps:
       - name: Check job results
         env:
-          NEEDS: ${{ toJSON(needs) }}
+          RESULTS: ${{ join(needs.*.result, ' ') }}
         run: |
-          bad=$(jq -r 'to_entries[] | select(.value.result == "failure" or .value.result == "cancelled") | "\(.key): \(.value.result)"' <<<"$NEEDS")
-          if [[ -n "$bad" ]]; then
-            echo "::error::Jobs did not succeed: $(tr '\n' ' ' <<<"$bad")"
+          echo "results: $RESULTS"
+          if [[ " $RESULTS " == *" failure "* || " $RESULTS " == *" cancelled "* ]]; then
+            echo "::error::A needed job failed or was cancelled: $RESULTS"
             exit 1
           fi
-          jq -r 'to_entries[] | "\(.key): \(.value.result)"' <<<"$NEEDS"
