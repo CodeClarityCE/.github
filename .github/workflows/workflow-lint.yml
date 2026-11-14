@@ -28,6 +28,8 @@ jobs:
             -ignore 'reusable workflow call "\$/' \
             -format '{{range $err := .}}::error file={{$err.Filepath}},line={{$err.Line}},col={{$err.Column}}::{{$err.Message}}%0A```%0A{{replace $err.Snippet "\\n" "%0A"}}%0A```\n{{end}}'
       - name: zizmor
+        # Runs even when actionlint fails, so both report.
+        if: ${{ !cancelled() }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
