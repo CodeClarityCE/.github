@@ -127,7 +127,7 @@ jobs:
         run: echo "Built \`$TAG\` (target \`$TARGET\`, linux/amd64), not pushed." >>"$GITHUB_STEP_SUMMARY"
 
   push:
-    name: image push (${{ matrix.arch }})
+    name: image push
     needs: [meta]
     if: inputs.release && github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.CI_RELEASE == 'true' && needs.meta.outputs.exists == 'false'
     runs-on: ${{ matrix.runner }}

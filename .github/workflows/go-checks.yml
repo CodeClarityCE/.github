@@ -44,21 +44,30 @@ jobs:
         with:
           persist-credentials: false
           submodules: ${{ inputs.submodules }}
+      # Annotation path prefix for the module dir: "" for the root, else "dir/".
+      - name: Annotation prefix
+        id: prefix
+        run: |
+          prefix="${MODULE_DIR#./}"; prefix="${prefix#.}"; prefix="${prefix:+${prefix%/}/}"
+          echo "prefix=$prefix" >>"$GITHUB_OUTPUT"
       - name: go mod download
         run: go mod download
       - name: go mod tidy
+        env:
+          FILE_PREFIX: ${{ steps.prefix.outputs.prefix }}
         run: |
           go mod tidy -diff || {
-            echo "::error file=${MODULE_DIR#./}/go.mod::go.mod or go.sum is not tidy. Run go mod tidy and commit the result."
+            echo "::error file=${FILE_PREFIX}go.mod::go.mod or go.sum is not tidy. Run go mod tidy and commit the result."
             exit 1
           }
       - name: gofmt
+        env:
+          FILE_PREFIX: ${{ steps.prefix.outputs.prefix }}
         run: |
           files=$(gofmt -l .)
           if [[ -n "$files" ]]; then
-            prefix="${MODULE_DIR#./}"; prefix="${prefix#.}"; prefix="${prefix:+${prefix%/}/}"
             while IFS= read -r f; do
-              echo "::error file=$prefix$f::$f is not gofmt-formatted"
+              echo "::error file=$FILE_PREFIX$f::$f is not gofmt-formatted"
             done <<<"$files"
             echo "Run gofmt -w on the files above"
             exit 1

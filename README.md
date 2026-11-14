@@ -21,6 +21,7 @@ name: CI
 
 on:
   pull_request:
+    branches: [main, develop]
   push:
     branches: [main, develop]
 
@@ -43,10 +44,18 @@ jobs:
     timeout-minutes: 5
     permissions: {}
     steps:
-      - env:
-          RESULT: ${{ needs.go.result }}
-        run: '[[ "$RESULT" == success ]] || { echo "::error::go did not succeed: $RESULT"; exit 1; }'
+      - name: Check job results
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "results: $RESULTS"
+          if [[ " $RESULTS " == *" failure "* || " $RESULTS " == *" cancelled "* ]]; then
+            echo "::error::A needed job failed or was cancelled: $RESULTS"
+            exit 1
+          fi
 ```
+
+The `Check job results` step is the one gate rule, used unchanged in every caller and in the central workflows' own `ci` jobs: it fails if any needed job failed or was cancelled, and skipped counts as success.
 
 ### Go image repos
 
@@ -102,4 +111,4 @@ Release jobs run on pushes to `main` only when the repo variable `CI_RELEASE` is
 
 ## Testing
 
-`ci.yml` runs `go-library.yml` against `fixtures/go-library` `go-image.yml` against `fixtures/go-image` and `node-image.yml` against `fixtures/node-image` (amd64 builds, not pushed), which also lints this repo's workflows. Move `v1` only after it is green.
+`ci.yml` runs `go-library.yml` against `fixtures/go-library`, `go-image.yml` against `fixtures/go-image`, and `node-image.yml` against `fixtures/node-image` (amd64 builds, not pushed), which also lints this repo's workflows. Move `v1` only after it is green.

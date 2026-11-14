@@ -42,6 +42,7 @@ jobs:
       working-directory: fixtures/node-image
 
   # The required check. Called workflow jobs show as "<caller> / <job>", so this one lives here.
+  # Fails if any needed job failed or was cancelled; skipped counts as success.
   ci:
     needs: [go-library, go-image, node-image]
     if: always()
@@ -51,8 +52,10 @@ jobs:
     steps:
       - name: Check job results
         env:
-          NEEDS: ${{ toJSON(needs) }}
+          RESULTS: ${{ join(needs.*.result, ' ') }}
         run: |
-          jq -r 'to_entries[] | "\(.key): \(.value.result)"' <<<"$NEEDS"
-          bad=$(jq -r 'to_entries[] | select(.value.result != "success") | .key' <<<"$NEEDS")
-          [[ -z "$bad" ]] || { echo "::error::Did not succeed: $(tr '\n' ' ' <<<"$bad")"; exit 1; }
+          echo "results: $RESULTS"
+          if [[ " $RESULTS " == *" failure "* || " $RESULTS " == *" cancelled "* ]]; then
+            echo "::error::A needed job failed or was cancelled: $RESULTS"
+            exit 1
+          fi
