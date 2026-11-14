@@ -2,14 +2,15 @@
 
 Central reusable GitHub Actions workflows for CodeClarityCE repos. Callers reference them at the moving `v1` tag; breaking changes go out as `v2`. Third-party actions and images are pinned by SHA or digest. See ADR 0009 in `codeclarity-dev`.
 
-| Workflow            | For                     | What it runs                                                                                               |
-| ------------------- | ----------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `go-library.yml`    | Go utilities            | version check, Go checks, workflow lint, release, `ci`                                                     |
-| `go-image.yml`      | Go plugins and services | version check, Go checks (`GOWORK=off`, recursive submodules), workflow lint, image build or release, `ci` |
-| `go-checks.yml`     | other workflows         | download, tidy, gofmt, vet, test, govulncheck in the pinned Go image                                       |
-| `image.yml`         | other workflows         | image build, or the native multi-arch release with provenance and GitHub release                           |
-| `version-check.yml` | other workflows         | on PRs to `main`, fails unless the version file is bumped                                                  |
-| `workflow-lint.yml` | other workflows         | actionlint and zizmor over the caller's `.github/`                                                         |
+| Workflow            | For                     | What it runs                                                                                                   |
+| ------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `go-library.yml`    | Go utilities            | version check, Go checks, workflow lint, release, `ci`                                                         |
+| `go-image.yml`      | Go plugins and services | version check, Go checks (`GOWORK=off`, recursive submodules), workflow lint, image build or release, `ci`     |
+| `node-image.yml`    | api, frontend           | version check, Node checks in the Dockerfile's `toolchain` target, workflow lint, image build or release, `ci` |
+| `go-checks.yml`     | other workflows         | download, tidy, gofmt, vet, test, govulncheck in the pinned Go image                                           |
+| `image.yml`         | other workflows         | image build, or the native multi-arch release with provenance and GitHub release                               |
+| `version-check.yml` | other workflows         | on PRs to `main`, fails unless the version file is bumped                                                      |
+| `workflow-lint.yml` | other workflows         | actionlint and zizmor over the caller's `.github/`                                                             |
 
 ## Caller
 
@@ -62,6 +63,23 @@ go:
   #   target: plugin   # Dockerfile target, the default
 ```
 
+### Node image repos
+
+Image `codeclarityce/<name>` and version come from `package.json` (`name`, `version`); the git tag is `v<version>`. The job stages `.cloud/docker/pnpm-workspace.yaml` at the package root, builds the Dockerfile's `toolchain` target and runs each step in it with the pnpm store cached: `pnpm install --frozen-lockfile`, `pnpm lint:check`, `pnpm type-check`, the test command, the extra test command if set, and `pnpm exec prettier src --check`. Same permissions as the Go image call:
+
+```yaml
+node:
+  uses: CodeClarityCE/.github/.github/workflows/node-image.yml@v1
+  permissions:
+    contents: write
+    id-token: write
+    attestations: write
+  with:
+    test-command: pnpm test # the default
+    extra-test-command: pnpm test:e2e test/integration/*contract*.e2e-spec.ts
+  #   target: ""        # Dockerfile target; empty builds the last stage, the default
+```
+
 ## image.yml
 
 | Input        | Default                    |                                                               |
@@ -84,4 +102,4 @@ Release jobs run on pushes to `main` only when the repo variable `CI_RELEASE` is
 
 ## Testing
 
-`ci.yml` runs `go-library.yml` against `fixtures/go-library` and `go-image.yml` against `fixtures/go-image` (amd64 build, not pushed), which also lints this repo's workflows. Move `v1` only after it is green.
+`ci.yml` runs `go-library.yml` against `fixtures/go-library` `go-image.yml` against `fixtures/go-image` and `node-image.yml` against `fixtures/node-image` (amd64 builds, not pushed), which also lints this repo's workflows. Move `v1` only after it is green.

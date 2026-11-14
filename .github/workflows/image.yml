@@ -123,7 +123,7 @@ jobs:
       - name: Summary
         env:
           TAG: ${{ needs.meta.outputs.tag }}
-          TARGET: ${{ inputs.target }}
+          TARGET: ${{ inputs.target || 'last stage' }}
         run: echo "Built \`$TAG\` (target \`$TARGET\`, linux/amd64), not pushed." >>"$GITHUB_STEP_SUMMARY"
 
   push:

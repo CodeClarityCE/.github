@@ -1,0 +1,207 @@
+# CI for Node image repos (api, frontend): version check, checks in the Dockerfile's
+# toolchain target, workflow lint, image build, and the gated release.
+# Callers set concurrency and the top-level ci job; see README.md.
+name: Node image
+
+on:
+  workflow_call:
+    inputs:
+      test-command:
+        description: Unit test command, run in the toolchain container.
+        type: string
+        default: pnpm test
+      extra-test-command:
+        description: Optional second test command, such as api's contract e2e tests.
+        type: string
+        default: ""
+      target:
+        description: Dockerfile target for the image build. Empty builds the last stage.
+        type: string
+        default: ""
+      working-directory:
+        description: Directory holding package.json, used as the Docker build context.
+        type: string
+        default: .
+      dockerfile:
+        description: Dockerfile, relative to the working directory.
+        type: string
+        default: .cloud/docker/Dockerfile
+
+permissions: {}
+
+jobs:
+  meta:
+    name: package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      image: ${{ steps.read.outputs.image }}
+      version: ${{ steps.read.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: read
+        env:
+          PACKAGE: ${{ inputs.working-directory }}/package.json
+        run: |
+          set -euo pipefail
+          file="${PACKAGE#./}"
+          name=$(jq -er .name "$PACKAGE") || { echo "::error file=$file::No name in package.json"; exit 1; }
+          version=$(jq -er .version "$PACKAGE") || { echo "::error file=$file::No version in package.json"; exit 1; }
+          [[ "$name" =~ ^[a-z0-9][a-z0-9._-]*$ ]] || { echo "::error file=$file::Package name must be a plain image name"; exit 1; }
+          {
+            echo "image=codeclarityce/$name"
+            echo "version=$version"
+          } >>"$GITHUB_OUTPUT"
+
+  version:
+    needs: [meta]
+    uses: $/.github/workflows/version-check.yml
+    permissions:
+      contents: read
+    with:
+      version-file: ${{ inputs.working-directory }}/package.json
+      image: ${{ needs.meta.outputs.image }}
+      tag-prefix: v
+
+  checks:
+    name: node checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      PKG_DIR: ${{ inputs.working-directory }}
+      TOOLCHAIN: node-toolchain:ci
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # pnpm reads minimumReleaseAge and allowBuilds from here, as in Jenkins.
+      - name: Stage pnpm config
+        working-directory: ${{ inputs.working-directory }}
+        run: cp .cloud/docker/pnpm-workspace.yaml pnpm-workspace.yaml
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build toolchain image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ${{ inputs.working-directory }}
+          file: ${{ inputs.working-directory }}/${{ inputs.dockerfile }}
+          target: toolchain
+          load: true
+          tags: ${{ env.TOOLCHAIN }}
+          cache-from: type=gha,scope=toolchain
+          cache-to: type=gha,mode=max,scope=toolchain
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/pnpm-store
+          key: pnpm-store-${{ hashFiles(format('{0}/pnpm-lock.yaml', inputs.working-directory)) }}
+          restore-keys: pnpm-store-
+      # tc runs a command in the toolchain container as the runner user, like Jenkins' inToolchain.
+      - name: Set up toolchain runner
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin" "$RUNNER_TEMP/ci-home" "$RUNNER_TEMP/pnpm-store"
+          cat >"$RUNNER_TEMP/bin/tc" <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          exec docker run --rm -u "$(id -u):$(id -g)" \
+            -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" -v "$RUNNER_TEMP:$RUNNER_TEMP" \
+            -w "$GITHUB_WORKSPACE/$PKG_DIR" -e HOME="$RUNNER_TEMP/ci-home" -e CI=true \
+            -e PNPM_STORE="$RUNNER_TEMP/pnpm-store" "$TOOLCHAIN" sh -ec "$1"
+          EOF
+          chmod +x "$RUNNER_TEMP/bin/tc"
+          echo "$RUNNER_TEMP/bin" >>"$GITHUB_PATH"
+      - name: pnpm install
+        run: tc 'pnpm install --frozen-lockfile --store-dir "$PNPM_STORE"'
+      - name: Lint
+        run: tc 'pnpm lint:check'
+      - name: Type-check
+        run: tc 'pnpm type-check'
+      - name: Unit tests
+        env:
+          CMD: ${{ inputs.test-command }}
+        run: tc "$CMD"
+      - name: Extra tests
+        if: inputs.extra-test-command != ''
+        env:
+          CMD: ${{ inputs.extra-test-command }}
+        run: tc "$CMD"
+      - name: Prettier
+        # Runs even when the tests fail, so formatting is reported too.
+        if: ${{ !cancelled() }}
+        run: |
+          set +e
+          out=$(tc 'pnpm exec prettier src --check' 2>&1)
+          status=$?
+          echo "$out"
+          if [[ $status != 0 ]]; then
+            prefix="${PKG_DIR#./}"; prefix="${prefix#.}"; prefix="${prefix:+${prefix%/}/}"
+            grep '^\[warn\] ' <<<"$out" | grep -v 'Code style issues' | sed 's/^\[warn\] //' | while IFS= read -r f; do
+              echo "::error file=$prefix$f::$f is not Prettier-formatted"
+            done
+            echo "Run prettier --write on the files above"
+          fi
+          exit $status
+
+  lint:
+    uses: $/.github/workflows/workflow-lint.yml
+    permissions:
+      contents: read
+
+  # PRs, develop, and main while CI_RELEASE is off: amd64 build, not pushed.
+  build:
+    needs: [meta]
+    if: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.CI_RELEASE == 'true') }}
+    uses: $/.github/workflows/image.yml
+    # A ceiling for the skipped release jobs in image.yml; the build job itself reads only.
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    with:
+      image: ${{ needs.meta.outputs.image }}
+      version: v${{ needs.meta.outputs.version }}
+      target: ${{ inputs.target }}
+      context: ${{ inputs.working-directory }}
+      dockerfile: ${{ inputs.dockerfile }}
+
+  release:
+    needs: [meta, checks, lint]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.CI_RELEASE == 'true'
+    uses: $/.github/workflows/image.yml
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    with:
+      image: ${{ needs.meta.outputs.image }}
+      version: v${{ needs.meta.outputs.version }}
+      target: ${{ inputs.target }}
+      context: ${{ inputs.working-directory }}
+      dockerfile: ${{ inputs.dockerfile }}
+      release: true
+
+  # Fails if any job failed or was cancelled; skipped jobs count as success.
+  ci:
+    needs: [meta, version, checks, lint, build, release]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Check job results
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          bad=$(jq -r 'to_entries[] | select(.value.result == "failure" or .value.result == "cancelled") | "\(.key): \(.value.result)"' <<<"$NEEDS")
+          if [[ -n "$bad" ]]; then
+            echo "::error::Jobs did not succeed: $(tr '\n' ' ' <<<"$bad")"
+            exit 1
+          fi
+          jq -r 'to_entries[] | "\(.key): \(.value.result)"' <<<"$NEEDS"
