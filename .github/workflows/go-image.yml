@@ -18,6 +18,14 @@ on:
         description: Dockerfile, relative to the working directory.
         type: string
         default: .cloud/docker/Dockerfile
+    # Passed on to image.yml for the release only.
+    secrets:
+      DOCKERHUB_USERNAME:
+        description: Docker Hub user that pushes the image. Needed only when releasing.
+        required: false
+      DOCKERHUB_TOKEN:
+        description: Docker Hub access token for that user. Needed only when releasing.
+        required: false
 
 permissions: {}
 
@@ -104,6 +112,9 @@ jobs:
       dockerfile: ${{ inputs.dockerfile }}
       submodules: recursive
       release: true
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
   # Fails if any needed job failed or was cancelled; skipped counts as success.
   ci:
