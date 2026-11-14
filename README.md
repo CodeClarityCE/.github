@@ -2,14 +2,14 @@
 
 Central reusable GitHub Actions workflows for CodeClarityCE repos. Callers reference them at the moving `v1` tag; breaking changes go out as `v2`. Third-party actions and images are pinned by SHA or digest. See ADR 0009 in `codeclarity-dev`.
 
-| Workflow | For | What it runs |
-|---|---|---|
-| `go-library.yml` | Go utilities | version check, Go checks, workflow lint, release, `ci` |
-| `go-image.yml` | Go plugins and services | version check, Go checks (`GOWORK=off`, recursive submodules), workflow lint, image build or release, `ci` |
-| `go-checks.yml` | other workflows | download, tidy, gofmt, vet, test, govulncheck in the pinned Go image |
-| `image.yml` | other workflows | image build, or the native multi-arch release with provenance and GitHub release |
-| `version-check.yml` | other workflows | on PRs to `main`, fails unless the version file is bumped |
-| `workflow-lint.yml` | other workflows | actionlint and zizmor over the caller's `.github/` |
+| Workflow            | For                     | What it runs                                                                                               |
+| ------------------- | ----------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `go-library.yml`    | Go utilities            | version check, Go checks, workflow lint, release, `ci`                                                     |
+| `go-image.yml`      | Go plugins and services | version check, Go checks (`GOWORK=off`, recursive submodules), workflow lint, image build or release, `ci` |
+| `go-checks.yml`     | other workflows         | download, tidy, gofmt, vet, test, govulncheck in the pinned Go image                                       |
+| `image.yml`         | other workflows         | image build, or the native multi-arch release with provenance and GitHub release                           |
+| `version-check.yml` | other workflows         | on PRs to `main`, fails unless the version file is bumped                                                  |
+| `workflow-lint.yml` | other workflows         | actionlint and zizmor over the caller's `.github/`                                                         |
 
 ## Caller
 
@@ -52,27 +52,27 @@ jobs:
 Same as above with `go-image.yml`. Image name and version come from `config.json` (`image_name`, `version`). The release jobs also need `id-token` and `attestations`:
 
 ```yaml
-  go:
-    uses: CodeClarityCE/.github/.github/workflows/go-image.yml@v1
-    permissions:
-      contents: write
-      id-token: write
-      attestations: write
-    # with:
-    #   target: plugin   # Dockerfile target, the default
+go:
+  uses: CodeClarityCE/.github/.github/workflows/go-image.yml@v1
+  permissions:
+    contents: write
+    id-token: write
+    attestations: write
+  # with:
+  #   target: plugin   # Dockerfile target, the default
 ```
 
 ## image.yml
 
-| Input | Default | |
-|---|---|---|
-| `image` | required | Docker Hub repository, such as `codeclarityce/plugin-js-sbom` |
-| `version` | required | version and git tag; the Docker tag drops a leading `v` |
-| `target` | `plugin` | Dockerfile build target |
-| `context` | `.` | build context, relative to the repo root |
-| `dockerfile` | `.cloud/docker/Dockerfile` | relative to the context |
-| `submodules` | `"false"` | checkout `submodules` value |
-| `release` | `false` | push and release instead of a local build |
+| Input        | Default                    |                                                               |
+| ------------ | -------------------------- | ------------------------------------------------------------- |
+| `image`      | required                   | Docker Hub repository, such as `codeclarityce/plugin-js-sbom` |
+| `version`    | required                   | version and git tag; the Docker tag drops a leading `v`       |
+| `target`     | `plugin`                   | Dockerfile build target                                       |
+| `context`    | `.`                        | build context, relative to the repo root                      |
+| `dockerfile` | `.cloud/docker/Dockerfile` | relative to the context                                       |
+| `submodules` | `"false"`                  | checkout `submodules` value                                   |
+| `release`    | `false`                    | push and release instead of a local build                     |
 
 Outputs: `tag` (such as `codeclarityce/plugin-js-sbom:0.0.26-alpha`), `released` (`true` when this run released), `digest` (manifest list digest when released).
 
