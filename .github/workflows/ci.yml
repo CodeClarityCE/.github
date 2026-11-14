@@ -31,9 +31,19 @@ jobs:
     with:
       working-directory: fixtures/go-image
 
+  # Throwaway: version check of the image fixture against the PR base.
+  version-vs-base:
+    uses: $/.github/workflows/version-check.yml
+    permissions:
+      contents: read
+    with:
+      version-file: fixtures/go-image/config.json
+      base-branch: ci/101-go-image
+      image: codeclarityce/fixture-go-image
+
   # The required check. Called workflow jobs show as "<caller> / <job>", so this one lives here.
   ci:
-    needs: [go-library, go-image]
+    needs: [go-library, go-image, version-vs-base]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
