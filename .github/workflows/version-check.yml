@@ -1,0 +1,120 @@
+# On PRs to the release branch, fails unless the PR bumps the version.
+# Shared by the Go library, Go image and Node image workflows.
+name: Version check
+
+on:
+  workflow_call:
+    inputs:
+      version-file:
+        description: Version file, relative to the repo root.
+        type: string
+        default: config.json
+      jq-path:
+        description: jq path of the version in the version file.
+        type: string
+        default: .version
+      base-branch:
+        description: Branch whose version the PR must exceed.
+        type: string
+        default: main
+      image:
+        description: Image repository, such as codeclarityce/plugin-x. Adds the image tags to the summary.
+        type: string
+        default: ""
+    outputs:
+      version:
+        description: Version on the PR.
+        value: ${{ jobs.version.outputs.version }}
+      previous:
+        description: Version on the base branch, empty when it has none.
+        value: ${{ jobs.version.outputs.previous }}
+      prerelease:
+        description: true when the version contains alpha or beta.
+        value: ${{ jobs.version.outputs.prerelease }}
+
+permissions: {}
+
+jobs:
+  version:
+    name: version
+    if: github.event_name == 'pull_request' && github.base_ref == inputs.base-branch
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+      previous: ${{ steps.check.outputs.previous }}
+      prerelease: ${{ steps.check.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # A failed fetch of the base branch fails the job, never skips the check.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.base-branch }}
+          path: .version-base
+          persist-credentials: false
+      - id: check
+        env:
+          VERSION_FILE: ${{ inputs.version-file }}
+          JQ_PATH: ${{ inputs.jq-path }}
+          BASE: ${{ inputs.base-branch }}
+          IMAGE: ${{ inputs.image }}
+        run: |
+          set -euo pipefail
+          file="${VERSION_FILE#./}"
+          # Versions go into workflow commands, so only allow plain version characters.
+          read_version() {
+            v=$(jq -er "$JQ_PATH" "$1") || { echo "::error file=$file::No $JQ_PATH in $1"; exit 1; }
+            [[ "$v" =~ ^[0-9A-Za-z.+_-]+$ ]] || { echo "::error file=$file::Unexpected version format in $1"; exit 1; }
+          }
+          read_version "$file"
+          version="$v"
+          prerelease=false
+          if grep -q 'alpha\|beta' <<<"$version"; then prerelease=true; fi
+          # Docker tags drop the leading v.
+          tags=""
+          if [[ -n "$IMAGE" ]]; then tags="\`$IMAGE:${version#v}\`, \`$IMAGE:latest\`"; fi
+          {
+            echo "version=$version"
+            echo "prerelease=$prerelease"
+          } >>"$GITHUB_OUTPUT"
+
+          if [[ ! -f ".version-base/$file" ]]; then
+            echo "No $file on $BASE yet, skipping version check"
+            echo "previous=" >>"$GITHUB_OUTPUT"
+            {
+              echo "### Version check skipped"
+              echo "No \`$file\` on \`$BASE\` yet. Merging releases \`$version\` (prerelease: $prerelease)."
+              if [[ -n "$tags" ]]; then echo "Image tags: $tags"; fi
+            } >>"$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          read_version ".version-base/$file"
+          previous="$v"
+          echo "previous=$previous" >>"$GITHUB_OUTPUT"
+
+          highest=$(printf '%s\n%s\n' "$previous" "$version" | sort -V | tail -n1)
+          if [[ "$version" == "$previous" || "$highest" != "$version" ]]; then
+            key="${JQ_PATH##*.}"
+            line=$(grep -n -m1 "\"$key\"[[:space:]]*:" "$file" | cut -d: -f1 || true)
+            echo "::error file=$file,line=${line:-1},title=Version not bumped::PR version ($version) must be greater than $BASE version ($previous). Please update $file."
+            {
+              echo "### Version not bumped"
+              echo "PR version \`$version\` must be greater than \`$BASE\` version \`$previous\`. Update \`$file\`."
+            } >>"$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo "Version check passed: $previous -> $version"
+          {
+            echo "### Version check passed"
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Current \`$BASE\` version | \`$previous\` |"
+            echo "| Version this PR releases | \`$version\` |"
+            echo "| Git tag | \`$version\` |"
+            if [[ -n "$tags" ]]; then echo "| Image tags | $tags |"; fi
+            echo "| Prerelease | $prerelease |"
+          } >>"$GITHUB_STEP_SUMMARY"
