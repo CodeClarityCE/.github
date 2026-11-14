@@ -4,5 +4,5 @@ import { test } from "node:test";
 import { greet } from "./greet.js";
 
 test("greets by name", () => {
-  assert.equal(greet("CodeClarity"), "Hello, CodeClarity!");
+  assert.equal(greet("CodeClarity"), "Goodbye, CodeClarity!");
 });
