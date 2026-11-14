@@ -139,7 +139,7 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           set +e
-          out=$(tc 'pnpm exec prettier src --check' 2>&1)
+          out=$(tc 'pnpm exec prettier src --check --no-color' 2>&1)
           status=$?
           echo "$out"
           if [[ $status != 0 ]]; then
