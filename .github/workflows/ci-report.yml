@@ -1,0 +1,90 @@
+# Keeps one tracking issue per branch for a caller's `ci` result on a push to main or develop:
+# a failure opens it or comments on it, and a green run of the branch head comments and closes it.
+# Called from a caller job that needs `ci`; see README.md. Uses the run's own GITHUB_TOKEN and gh.
+name: CI report
+
+on:
+  workflow_call:
+    inputs:
+      ci-result:
+        description: The caller's needs.ci.result, success or failure.
+        type: string
+        required: true
+
+permissions: {}
+
+jobs:
+  report:
+    name: report
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      issues: write # create the labels, the issue and its comments
+      actions: read # list this run's jobs
+    steps:
+      - name: Open, update or close the tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          CI_RESULT: ${{ inputs.ci-result }}
+          EVENT: ${{ github.event_name }}
+          BRANCH: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          SERVER: ${{ github.server_url }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT" != push ]] || [[ "$BRANCH" != main && "$BRANCH" != develop ]]; then
+            echo "Not a push to main or develop ($EVENT on $BRANCH); nothing to report."
+            exit 0
+          fi
+          title="CI failing on $BRANCH"
+          marker="<!-- ci-failure-tracking: $BRANCH -->"
+          short=${SHA:0:7}
+          commit="[\`$short\`]($SERVER/$GH_REPO/commit/$SHA)"
+          run="[run $RUN_ID attempt $RUN_ATTEMPT]($SERVER/$GH_REPO/actions/runs/$RUN_ID/attempts/$RUN_ATTEMPT)"
+
+          # The open tracking issue for this branch, found by label plus exact title or marker.
+          issue=$(gh issue list --label ci-failure --state open --limit 100 --json number,title,body |
+            jq -r --arg t "$title" --arg m "$marker" \
+              '[.[] | select(.title == $t or (.body | contains($m)))] | sort_by(.number) | first | .number // empty')
+
+          case "$CI_RESULT" in
+          failure)
+            # Labels the repo lacks are created; existing ones are left as they are.
+            labels=$(gh label list --limit 500 --json name --jq '.[].name')
+            grep -qxF ci-failure <<<"$labels" ||
+              gh label create ci-failure --color B60205 --description "The CI required check failed on main or develop"
+            grep -qxF needs-triage <<<"$labels" ||
+              gh label create needs-triage --color FBCA04 --description "Needs triage"
+
+            jobs=$(gh api --paginate "repos/$GH_REPO/actions/runs/$RUN_ID/attempts/$RUN_ATTEMPT/jobs" \
+              --jq '.jobs[] | select(.conclusion == "failure" or .conclusion == "cancelled") | "- `\(.name)`: \(.conclusion)"')
+            body=$(printf '%s\n\n`ci` failed on `%s` at %s (%s).\n\nFailed or cancelled jobs:\n\n%s\n' \
+              "$marker" "$BRANCH" "$commit" "$run" "${jobs:-- none listed}")
+            if [[ -n "$issue" ]]; then
+              gh issue comment "$issue" --body "$body"
+              echo "Commented on #$issue."
+            else
+              gh issue create --title "$title" --label ci-failure --label needs-triage --body "$body"
+            fi
+            ;;
+          success)
+            if [[ -z "$issue" ]]; then
+              echo "No open tracking issue for $BRANCH."
+              exit 0
+            fi
+            # A green re-run of an older commit must not close an issue the branch head still has.
+            head=$(gh api "repos/$GH_REPO/branches/$BRANCH" --jq .commit.sha)
+            if [[ "$head" != "$SHA" ]]; then
+              echo "$short is no longer the head of $BRANCH (${head:0:7}); leaving #$issue open."
+              exit 0
+            fi
+            gh issue comment "$issue" --body "\`ci\` is green on \`$BRANCH\` again at $commit ($run). Closing."
+            gh issue close "$issue"
+            ;;
+          *)
+            echo "ci-result is '$CI_RESULT'; only success and failure are reported."
+            ;;
+          esac
