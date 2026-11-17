@@ -60,8 +60,8 @@ jobs:
               gh label create needs-triage --color FBCA04 --description "Needs triage"
 
             jobs=$(gh api --paginate "repos/$GH_REPO/actions/runs/$RUN_ID/attempts/$RUN_ATTEMPT/jobs" \
-              --jq '.jobs[] | select(.conclusion == "failure" or .conclusion == "cancelled") | "- `\(.name)`: \(.conclusion)"')
-            body=$(printf '%s\n\n`ci` failed on `%s` at %s (%s).\n\nFailed or cancelled jobs:\n\n%s\n' \
+              --jq '.jobs[] | select(.conclusion == "failure" or .conclusion == "cancelled") | "- \u0060\(.name)\u0060: \(.conclusion)"')
+            body=$(printf "%s\n\n\`ci\` failed on \`%s\` at %s (%s).\n\nFailed or cancelled jobs:\n\n%s\n" \
               "$marker" "$BRANCH" "$commit" "$run" "${jobs:-- none listed}")
             if [[ -n "$issue" ]]; then
               gh issue comment "$issue" --body "$body"
