@@ -11,6 +11,7 @@ Central reusable GitHub Actions workflows for CodeClarityCE repos. Callers refer
 | `image.yml`         | other workflows         | image build, or the native multi-arch release with provenance and GitHub release                               |
 | `version-check.yml` | other workflows         | on PRs to `main`, fails unless the version file is bumped                                                      |
 | `workflow-lint.yml` | other workflows         | actionlint and zizmor over the caller's `.github/`                                                             |
+| `ci-report.yml`     | every caller            | on pushes to `main` or `develop`, keeps one `ci-failure` tracking issue per branch                             |
 
 ## Caller
 
@@ -53,13 +54,34 @@ jobs:
             echo "::error::A needed job failed or was cancelled: $RESULTS"
             exit 1
           fi
+
+  # Tracks a failing ci on pushes to main and develop in one issue per branch; not the required check.
+  report:
+    needs: [ci]
+    if: ${{ !cancelled() && github.event_name == 'push' && (needs.ci.result == 'success' || needs.ci.result == 'failure') }}
+    uses: CodeClarityCE/.github/.github/workflows/ci-report.yml@v1
+    permissions:
+      issues: write
+      actions: read
+    with:
+      ci-result: ${{ needs.ci.result }}
 ```
 
 The `Check job results` step is the one gate rule, used unchanged in every caller and in the central workflows' own `ci` jobs: it fails if any needed job failed or was cancelled, and skipped counts as success.
 
+### CI report
+
+Every caller ends with the `report` job above, after `ci`. It never runs for pull requests or a cancelled run, and it is not the required check, so its own failure leaves `ci` as it was. Do not name it `ci` or put it in `ci`'s `needs`.
+
+- When `ci` fails, it opens an issue titled `CI failing on <branch>`, labelled `ci-failure` and `needs-triage`, or comments on the open one. It never opens a second. The issue names the commit, the run and every job that failed or was cancelled, nested ones as `<caller job> / <job>`. Missing labels are created first.
+- When `ci` is green and the run's commit is still the branch head, it comments on the open issue and closes it. A green re-run of an older commit leaves the issue open.
+- The job grants `issues: write` and `actions: read` (to list the run's jobs); the workflow top level stays `permissions: {}`.
+
+Find the open ones across the org with `gh search issues --owner CodeClarityCE label:ci-failure state:open`.
+
 ### Go image repos
 
-Same as above with `go-image.yml`. Image name and version come from `config.json` (`image_name`, `version`). The release jobs also need `id-token` and `attestations`, and the Docker Hub secrets passed by name:
+Same as above, `ci` and `report` jobs included, with `go-image.yml`. Image name and version come from `config.json` (`image_name`, `version`). The release jobs also need `id-token` and `attestations`, and the Docker Hub secrets passed by name:
 
 ```yaml
 go:
@@ -77,7 +99,7 @@ go:
 
 ### Node image repos
 
-Image `codeclarityce/<name>` and version come from `package.json` (`name`, `version`); the git tag is `v<version>`. The job stages `.cloud/docker/pnpm-workspace.yaml` at the package root, builds the Dockerfile's `toolchain` target and runs each step in it with the pnpm store cached: `pnpm install --frozen-lockfile`, `pnpm lint:check`, `pnpm type-check`, the test command, the extra test command if set, and `pnpm exec prettier src --check`. Same permissions and secrets as the Go image call:
+Image `codeclarityce/<name>` and version come from `package.json` (`name`, `version`); the git tag is `v<version>`. The job stages `.cloud/docker/pnpm-workspace.yaml` at the package root, builds the Dockerfile's `toolchain` target and runs each step in it with the pnpm store cached: `pnpm install --frozen-lockfile`, `pnpm lint:check`, `pnpm type-check`, the test command, the extra test command if set, and `pnpm exec prettier src --check`. Same permissions and secrets as the Go image call, and the same `ci` and `report` jobs after it:
 
 ```yaml
 node:
