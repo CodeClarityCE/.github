@@ -1,4 +1,5 @@
-# Lints the calling repo's workflows and Dependabot config with actionlint and zizmor.
+# Lints the calling repo's workflows and Dependabot config with actionlint and zizmor, and scans the
+# commits under test for secrets with gitleaks and this repo's .gitleaks.toml.
 name: Workflow lint
 
 on:
@@ -9,6 +10,8 @@ permissions: {}
 env:
   ACTIONLINT_IMAGE: rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
   ZIZMOR_IMAGE: ghcr.io/zizmorcore/zizmor:1.32.0@sha256:3014cc8f68f663935f69b3c3e0e41f5ce102b268d97db13db0f62208747f860d
+  # The umbrella's pre-commit hook and devcontainer use the same version; keep them in sync.
+  GITLEAKS_IMAGE: ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
 
 jobs:
   workflows:
@@ -23,9 +26,11 @@ jobs:
           persist-credentials: false
       - name: actionlint
         run: |
-          # actionlint 1.7.12 predates the $/ self-repository syntax, so skip that one error.
+          # actionlint 1.7.12 predates the $/ self-repository syntax and job.workflow_repository and
+          # job.workflow_sha, so skip those errors.
           docker run --rm -v "$GITHUB_WORKSPACE:/repo" -w /repo "$ACTIONLINT_IMAGE" \
             -ignore 'reusable workflow call "\$/' \
+            -ignore 'property "workflow_(repository|sha)" is not defined in object type \{check_run_id' \
             -format '{{range $err := .}}::error file={{$err.Filepath}},line={{$err.Line}},col={{$err.Column}}::{{$err.Message}}%0A```%0A{{replace $err.Snippet "\\n" "%0A"}}%0A```\n{{end}}'
       - name: zizmor
         # Runs even when actionlint fails, so both report.
@@ -47,3 +52,50 @@ jobs:
           EOF
           docker run --rm -e GH_TOKEN -v "$GITHUB_WORKSPACE:/repo:ro" -v "$RUNNER_TEMP/zizmor.yml:/zizmor.yml:ro" \
             -w /repo "$ZIZMOR_IMAGE" --config /zizmor.yml --format github .
+
+  secrets:
+    name: secret scan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: gitleaks
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.event.after }}
+          # The rules come from this workflow's own commit, so a caller on v1 gets v1's rules.
+          RULES_REPO: ${{ job.workflow_repository }}
+          RULES_SHA: ${{ job.workflow_sha }}
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/gitleaks.toml" \
+            "https://raw.githubusercontent.com/$RULES_REPO/$RULES_SHA/.gitleaks.toml"
+          # A PR scans its commits, a push the commits pushed; with no usable range, the working tree.
+          range=
+          case "$EVENT" in
+          pull_request | pull_request_target) range="$PR_BASE..$PR_HEAD" ;;
+          push)
+            if [[ -n "$PUSH_BEFORE" && ! "$PUSH_BEFORE" =~ ^0+$ ]] && git cat-file -e "$PUSH_BEFORE^{commit}" 2>/dev/null; then
+              range="$PUSH_BEFORE..$PUSH_AFTER"
+            fi
+            ;;
+          esac
+          if [[ -n "$range" ]]; then
+            echo "Scanning the commits in $range."
+            mode=(git --log-opts="$range")
+          else
+            echo "No commit range for this $EVENT; scanning the working tree."
+            mode=(dir)
+          fi
+          # Findings print with the value redacted; the repo's .gitleaksignore is read from its root.
+          docker run --rm -v "$GITHUB_WORKSPACE:/repo:ro" -v "$RUNNER_TEMP/gitleaks.toml:/gitleaks.toml:ro" \
+            -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0=/repo \
+            -w /repo "$GITLEAKS_IMAGE" "${mode[@]}" --config /gitleaks.toml --redact --no-banner --verbose .
