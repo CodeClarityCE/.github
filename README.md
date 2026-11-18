@@ -151,4 +151,14 @@ Release jobs run on pushes to `main` only when the repo variable `CI_RELEASE` is
 
 ## Testing
 
-`ci.yml` runs `go-library.yml` against `fixtures/go-library`, `go-image.yml` against `fixtures/go-image`, and `node-image.yml` against `fixtures/node-image` (amd64 builds, not pushed), which also lints this repo's workflows. Move `v1` only after it is green.
+`ci.yml` runs `go-library.yml` against `fixtures/go-library`, `go-image.yml` against `fixtures/go-image`, and `node-image.yml` against `fixtures/node-image` (amd64 builds, not pushed), which also lints this repo's workflows. It passes `version-check: false`, since the fixtures never release: a `develop` -> `main` PR here needs no fixture version bump. Callers leave the input at its default, so their PRs to `main` must still bump the version.
+
+## Moving `v1`
+
+Changes reach callers only when `v1` moves, in this order:
+
+1. Work lands on `develop` through PRs, with `ci` green.
+2. `develop` merges to `main` through a PR, with `ci` green.
+3. Only then `v1` moves, always to a commit on `main` (usually the merge commit): `git tag -f v1 origin/main && git push -f origin v1`.
+
+Never point `v1` at a commit that is only on `develop` or a feature branch: `main` falls behind what callers run, and the next `develop` -> `main` PR carries changes callers already have. A breaking change goes out as `v2` instead.

@@ -26,6 +26,10 @@ on:
         description: Dockerfile, relative to the working directory.
         type: string
         default: .cloud/docker/Dockerfile
+      version-check:
+        description: Fail PRs to main that do not bump the version. Off only for this repo's fixtures, which never release.
+        type: boolean
+        default: true
     # Passed on to image.yml for the release only.
     secrets:
       DOCKERHUB_USERNAME:
@@ -67,6 +71,7 @@ jobs:
 
   version:
     needs: [meta]
+    if: inputs.version-check
     uses: $/.github/workflows/version-check.yml
     permissions:
       contents: read
