@@ -10,7 +10,7 @@ Central reusable GitHub Actions workflows for CodeClarityCE repos. Callers refer
 | `go-checks.yml`     | other workflows         | download, tidy, gofmt, vet, test, govulncheck in the pinned Go image                                           |
 | `image.yml`         | other workflows         | image build, or the native multi-arch release with provenance and GitHub release                               |
 | `version-check.yml` | other workflows         | on PRs to `main`, fails unless the version file is bumped                                                      |
-| `workflow-lint.yml` | other workflows         | actionlint and zizmor over the caller's `.github/`                                                             |
+| `workflow-lint.yml` | other workflows         | actionlint and zizmor over the caller's `.github/`, and the gitleaks secret scan                               |
 | `ci-report.yml`     | every caller            | on pushes to `main` or `develop`, keeps one `ci-failure` tracking issue per branch                             |
 
 ## Caller
@@ -134,6 +134,16 @@ Secrets, both optional and needed only for `release: true`: `DOCKERHUB_USERNAME`
 Outputs: `tag` (such as `codeclarityce/plugin-js-sbom:0.0.26-alpha`), `released` (`true` when this run released), `digest` (manifest list digest when released).
 
 With `release: false` it builds linux/amd64 without pushing, using the GitHub Actions layer cache. With `release: true`, on a push to `main` with `CI_RELEASE` set to `true`, it skips with a summary note if the tag exists; otherwise it builds amd64 on `ubuntu-24.04` and arm64 on `ubuntu-24.04-arm` without cache, pushes each by digest, merges them into a manifest list tagged with the version and `latest`, attests build provenance on the manifest digest, and only then creates the GitHub release. The push, merge and release jobs run in the `release` environment, where `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` are stored. A reusable workflow only gets the secrets its caller passes, even environment secrets, so every workflow in the chain passes both by name: the repo's `ci.yml` to `go-image.yml` or `node-image.yml`, and that to `image.yml`. A secret that is not passed resolves to an empty string. Both are optional, so the build-only call to `image.yml` passes none. We pass them by name rather than with `secrets: inherit`, which zizmor flags. The caller job must grant `contents: write`, `id-token: write` and `attestations: write` even for the build-only call, since GitHub checks the skipped release jobs' permissions too.
+
+## Secret scan
+
+`workflow-lint.yml` has a `secret scan` job, so every caller gets it with no change to its `ci.yml`. It runs gitleaks from the digest-pinned `GITLEAKS_IMAGE` with the rules in this repo's `.gitleaks.toml`, read at the commit of the workflow itself (`job.workflow_sha`), so a caller on `v1` gets `v1`'s rules.
+
+- A pull request scans its commits (base to head); a push to `main` or `develop` scans the commits pushed. With no usable range, such as a new branch, it scans the working tree.
+- A finding fails the job and so the caller's `ci`. The log names the rule, file, line and fingerprint; the value is redacted.
+- `.gitleaks.toml` extends gitleaks' default rules with GitLab, GitHub and Slack token rules that have no entropy floor, matching what GitHub push protection rejects: `glpat-` followed by 20 x's fails, `glpat-test-token` passes. A test that needs a token-shaped value builds it at run time, such as a prefix joined to repeated characters.
+- A known dev key or test fixture is recorded in the repo's own `.gitleaksignore`, one fingerprint per line from the job's output, under a `#` comment saying why. A fingerprint from a commit scan is `<commit>:<file>:<rule>:<line>`; a working-tree one drops the commit.
+- The umbrella's pre-commit hook (`codeclarity-dev`'s `.githooks/`) runs the same version with a copy of `.gitleaks.toml`; its tests fail if the copy differs from this one at `v1`. Change the version here, in that hook and in the devcontainer together.
 
 ## Releases
 

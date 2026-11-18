@@ -1,6 +1,6 @@
 {
   "name": "fixture-node-image",
-  "version": "0.0.2-alpha",
+  "version": "0.0.3-alpha",
   "description": "Smoke test package for the Node image workflow",
   "private": true,
   "type": "module",
