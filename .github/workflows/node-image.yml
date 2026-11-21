@@ -26,6 +26,14 @@ on:
         description: Dockerfile, relative to the working directory.
         type: string
         default: .cloud/docker/Dockerfile
+      e2e-image:
+        description: Digest-pinned Playwright image (mcr.microsoft.com/playwright:vX.Y.Z-noble@sha256:...) matching the repo's @playwright/test. Set it to run the e2e job; empty skips it.
+        type: string
+        default: ""
+      e2e-command:
+        description: Playwright command for the e2e job, run in the e2e image after pnpm install.
+        type: string
+        default: pnpm exec playwright test
       version-check:
         description: Fail PRs to main that do not bump the version. Off only for this repo's fixtures, which never release.
         type: boolean
@@ -164,6 +172,69 @@ jobs:
           fi
           exit $status
 
+  # Opt-in: runs only when the caller sets e2e-image.
+  e2e:
+    name: e2e
+    if: inputs.e2e-image != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      PKG_DIR: ${{ inputs.working-directory }}
+      E2E_IMAGE: ${{ inputs.e2e-image }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check the image is pinned by digest
+        run: |
+          [[ "$E2E_IMAGE" =~ ^[^@[:space:]]+:[^@[:space:]]+@sha256:[0-9a-f]{64}$ ]] || {
+            echo "::error::e2e-image must be <image>:<tag>@sha256:<digest>, got: $E2E_IMAGE"
+            exit 1
+          }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Stage pnpm config
+        working-directory: ${{ inputs.working-directory }}
+        run: cp .cloud/docker/pnpm-workspace.yaml pnpm-workspace.yaml
+      # Its own key: the Playwright image is glibc, the toolchain image musl.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          lookup-only: ${{ github.ref == 'refs/heads/main' }} # zizmor: ignore[cache-poisoning]
+          path: ${{ runner.temp }}/pnpm-store
+          key: pnpm-store-e2e-${{ hashFiles(format('{0}/pnpm-lock.yaml', inputs.working-directory)) }}
+          restore-keys: pnpm-store-e2e-
+      # Root in the container, since corepack enable writes to /usr; files go back to the runner user.
+      - name: Playwright
+        env:
+          CMD: ${{ inputs.e2e-command }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/pnpm-store"
+          docker run --rm --ipc=host \
+            -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" -v "$RUNNER_TEMP:$RUNNER_TEMP" \
+            -w "$GITHUB_WORKSPACE/$PKG_DIR" -e CI=true -e COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
+            -e CMD -e WS="$GITHUB_WORKSPACE" -e STORE="$RUNNER_TEMP/pnpm-store" -e OWNER="$(id -u):$(id -g)" \
+            "$E2E_IMAGE" bash -ec '
+              restore() { chown -R "$OWNER" "$WS" "$STORE"; }
+              trap restore EXIT
+              npm install -g corepack@0.36.0 --force >/dev/null
+              corepack enable
+              pnpm install --frozen-lockfile --store-dir "$STORE"
+              eval "$CMD"
+            '
+      - name: Upload the report and traces
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-report
+          path: |
+            ${{ inputs.working-directory }}/playwright-report/
+            ${{ inputs.working-directory }}/test-results/
+          if-no-files-found: warn
+          retention-days: 14
+
   lint:
     uses: $/.github/workflows/workflow-lint.yml
     permissions:
@@ -186,9 +257,13 @@ jobs:
       context: ${{ inputs.working-directory }}
       dockerfile: ${{ inputs.dockerfile }}
 
+  # e2e may be skipped, which would skip a plain needs chain, so results are checked by hand.
   release:
-    needs: [meta, checks, lint]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.CI_RELEASE == 'true'
+    needs: [meta, checks, lint, e2e]
+    if: >-
+      ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.CI_RELEASE == 'true'
+      && needs.meta.result == 'success' && needs.checks.result == 'success' && needs.lint.result == 'success'
+      && (needs.e2e.result == 'success' || needs.e2e.result == 'skipped') }}
     uses: $/.github/workflows/image.yml
     permissions:
       contents: write
@@ -207,7 +282,7 @@ jobs:
 
   # Fails if any needed job failed or was cancelled; skipped counts as success.
   ci:
-    needs: [meta, version, checks, lint, build, release]
+    needs: [meta, version, checks, lint, e2e, build, release]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
