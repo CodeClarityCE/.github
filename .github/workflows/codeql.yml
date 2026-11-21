@@ -84,6 +84,9 @@ jobs:
       # Lets git, and the CodeQL action's git calls, read the checkout from the container.
       - name: Trust the checkout
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      # CodeQL needs `file` to find the Go binary it traces; the Go image lacks it.
+      - name: Install file
+        run: apt-get update -qq && apt-get install -y -qq --no-install-recommends file
       - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           languages: go
