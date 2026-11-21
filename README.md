@@ -12,6 +12,7 @@ Central reusable GitHub Actions workflows for CodeClarityCE repos. Callers refer
 | `version-check.yml` | other workflows         | on PRs to `main`, fails unless the version file is bumped                                                      |
 | `workflow-lint.yml` | other workflows         | actionlint and zizmor over the caller's `.github/`, and the gitleaks secret scan                               |
 | `ci-report.yml`     | every caller            | on pushes to `main` or `develop`, keeps one `ci-failure` tracking issue per branch                             |
+| `codeql.yml`        | every caller            | CodeQL for Actions, and Go or JavaScript/TypeScript when asked, on every PR and push                           |
 
 ## Caller
 
@@ -37,6 +38,16 @@ jobs:
     uses: CodeClarityCE/.github/.github/workflows/go-library.yml@v1
     permissions:
       contents: write # release job only; it runs on main when CI_RELEASE is true
+
+  # Its own job, outside ci's needs: the only job with security-events: write. See CodeQL below.
+  codeql:
+    uses: CodeClarityCE/.github/.github/workflows/codeql.yml@v1
+    permissions:
+      contents: read
+      security-events: write
+    with:
+      go-directory: . # omit for a repo without Go
+      # javascript: true
 
   ci:
     needs: [go]
@@ -135,6 +146,21 @@ Outputs: `tag` (such as `codeclarityce/plugin-js-sbom:0.0.26-alpha`), `released`
 
 With `release: false` it builds linux/amd64 without pushing, using the GitHub Actions layer cache. With `release: true`, on a push to `main` with `CI_RELEASE` set to `true`, it skips with a summary note if the tag exists; otherwise it builds amd64 on `ubuntu-24.04` and arm64 on `ubuntu-24.04-arm` without cache, pushes each by digest, merges them into a manifest list tagged with the version and `latest`, attests build provenance on the manifest digest, and only then creates the GitHub release. The push, merge and release jobs run in the `release` environment, where `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` are stored. A reusable workflow only gets the secrets its caller passes, even environment secrets, so every workflow in the chain passes both by name: the repo's `ci.yml` to `go-image.yml` or `node-image.yml`, and that to `image.yml`. A secret that is not passed resolves to an empty string. Both are optional, so the build-only call to `image.yml` passes none. We pass them by name rather than with `secrets: inherit`, which zizmor flags. The caller job must grant `contents: write`, `id-token: write` and `attestations: write` even for the build-only call, since GitHub checks the skipped release jobs' permissions too.
 
+## CodeQL
+
+`codeql.yml` runs CodeQL on every pull request and push the caller runs on, `develop` included, and uploads the results to code scanning. Each caller calls it as its own `codeql` job, as in the template above, so `security-events: write` goes to that job only and never to the release jobs.
+
+| Input          | Default |                                                      |
+| -------------- | ------- | ---------------------------------------------------- |
+| `go-directory` | `""`    | directory of the `go.mod` to analyze; empty skips Go |
+| `javascript`   | `false` | analyze JavaScript and TypeScript                    |
+
+- Actions is always analyzed, with no build. JavaScript/TypeScript needs no build either.
+- Go builds with `go build ./...` in the same pinned Go image as `go-checks.yml`, with `GOWORK=off` and no submodules, so a `go.work` pointing at sibling checkouts does not break it.
+- The job is not in `ci`'s `needs`: findings show as code scanning alerts and PR annotations, and never fail `ci`.
+- Pull requests from forks skip it, since their token cannot upload results.
+- GitHub rejects these uploads while CodeQL default setup is on, so repos that call it must have default setup off (the org's code security configuration keeps it off).
+
 ## Secret scan
 
 `workflow-lint.yml` has a `secret scan` job, so every caller gets it with no change to its `ci.yml`. It runs gitleaks from the digest-pinned `GITLEAKS_IMAGE` with the rules in this repo's `.gitleaks.toml`, read at the commit of the workflow itself (`job.workflow_sha`), so a caller on `v1` gets `v1`'s rules.
@@ -151,7 +177,7 @@ Release jobs run on pushes to `main` only when the repo variable `CI_RELEASE` is
 
 ## Testing
 
-`ci.yml` runs `go-library.yml` against `fixtures/go-library`, `go-image.yml` against `fixtures/go-image`, and `node-image.yml` against `fixtures/node-image` (amd64 builds, not pushed), which also lints this repo's workflows. It passes `version-check: false`, since the fixtures never release: a `develop` -> `main` PR here needs no fixture version bump. Callers leave the input at its default, so their PRs to `main` must still bump the version.
+`ci.yml` runs `go-library.yml` against `fixtures/go-library`, `go-image.yml` against `fixtures/go-image`, and `node-image.yml` against `fixtures/node-image` (amd64 builds, not pushed), which also lints this repo's workflows. Its `codeql` job runs `codeql.yml` over `fixtures/go-image`, the JavaScript fixture and the workflows. It passes `version-check: false`, since the fixtures never release: a `develop` -> `main` PR here needs no fixture version bump. Callers leave the input at its default, so their PRs to `main` must still bump the version.
 
 ## Moving `v1`
 

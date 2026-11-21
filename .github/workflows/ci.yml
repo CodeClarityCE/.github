@@ -45,6 +45,16 @@ jobs:
       working-directory: fixtures/node-image
       version-check: false
 
+  # CodeQL over the fixtures and this repo's workflows; not in ci's needs, so findings never fail ci.
+  codeql:
+    uses: $/.github/workflows/codeql.yml
+    permissions:
+      contents: read
+      security-events: write
+    with:
+      go-directory: fixtures/go-image
+      javascript: true
+
   # The required check. Called workflow jobs show as "<caller> / <job>", so this one lives here.
   # Fails if any needed job failed or was cancelled; skipped counts as success.
   ci:
