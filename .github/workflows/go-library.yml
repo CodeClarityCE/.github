@@ -9,11 +9,16 @@ on:
         description: Directory holding go.mod and config.json, relative to the repo root.
         type: string
         default: .
+      version-check:
+        description: Fail PRs to main that do not bump the version. Off only for this repo's fixtures, which never release.
+        type: boolean
+        default: true
 
 permissions: {}
 
 jobs:
   version:
+    if: inputs.version-check
     uses: $/.github/workflows/version-check.yml
     permissions:
       contents: read

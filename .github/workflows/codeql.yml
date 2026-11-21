@@ -1,0 +1,98 @@
+# CodeQL on every PR and push, called as its own job so only that job gets security-events: write.
+# Actions is always analyzed; Go and JavaScript/TypeScript when the inputs ask for them.
+name: CodeQL
+
+on:
+  workflow_call:
+    inputs:
+      go-directory:
+        description: Directory holding the go.mod to analyze, relative to the repo root; empty skips Go.
+        type: string
+        default: ""
+      javascript:
+        description: Analyze JavaScript and TypeScript.
+        type: boolean
+        default: false
+
+permissions: {}
+
+jobs:
+  # A fork PR's token is read-only and cannot upload results, so its jobs are skipped.
+  actions:
+    name: codeql (actions)
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          languages: actions
+          build-mode: none
+      - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          category: /language:actions
+
+  javascript:
+    name: codeql (javascript-typescript)
+    if: inputs.javascript && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          languages: javascript-typescript
+          build-mode: none
+      - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          category: /language:javascript-typescript
+
+  # Built as the image build does: pinned Go image, GOWORK=off, so a go.work pointing at
+  # sibling checkouts does not break the build.
+  go:
+    name: codeql (go)
+    if: inputs.go-directory != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      security-events: write
+    # Keep in sync with go-checks.yml, the Dockerfiles and go.mod.
+    container:
+      image: golang:1.27.4@sha256:5e8afd493a7124a8586e134d9b532731161d4b9becf9dee5a5956b107426f93d
+    env:
+      GOTOOLCHAIN: local
+      GOPRIVATE: github.com/CodeClarityCE/*
+      GOWORK: "off"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Lets git, and the CodeQL action's git calls, read the checkout from the container.
+      - name: Trust the checkout
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      # CodeQL needs `file` to find the Go binary it traces; the Go image lacks it.
+      - name: Install file
+        run: apt-get update -qq && apt-get install -y -qq --no-install-recommends file
+      - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          languages: go
+          build-mode: manual
+      # -buildvcs=false: the container user does not own the checkout, so VCS stamping would fail.
+      - name: go build
+        working-directory: ${{ inputs.go-directory }}
+        run: go build -buildvcs=false ./...
+      - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          category: /language:go
