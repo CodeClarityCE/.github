@@ -2,17 +2,17 @@
 
 Central reusable GitHub Actions workflows for CodeClarityCE repos. Callers reference them at the moving `v1` tag; breaking changes go out as `v2`. Third-party actions and images are pinned by SHA or digest. See ADR 0009 in `codeclarity-dev`.
 
-| Workflow            | For                     | What it runs                                                                                                   |
-| ------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `go-library.yml`    | Go utilities            | version check, Go checks, workflow lint, release, `ci`                                                         |
-| `go-image.yml`      | Go plugins and services | version check, Go checks (`GOWORK=off`, recursive submodules), workflow lint, image build or release, `ci`     |
-| `node-image.yml`    | api, frontend           | version check, Node checks in the Dockerfile's `toolchain` target, workflow lint, image build or release, `ci` |
-| `go-checks.yml`     | other workflows         | download, tidy, gofmt, vet, test, govulncheck in the pinned Go image                                           |
-| `image.yml`         | other workflows         | image build, or the native multi-arch release with provenance and GitHub release                               |
-| `version-check.yml` | other workflows         | on PRs to `main`, fails unless the version file is bumped                                                      |
-| `workflow-lint.yml` | other workflows         | actionlint and zizmor over the caller's `.github/`, and the gitleaks secret scan                               |
-| `ci-report.yml`     | every caller            | on pushes to `main` or `develop`, keeps one `ci-failure` tracking issue per branch                             |
-| `codeql.yml`        | every caller            | CodeQL for Actions, and Go or JavaScript/TypeScript when asked, on every PR and push                           |
+| Workflow            | For                     | What it runs                                                                                                                          |
+| ------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `go-library.yml`    | Go utilities            | version check, Go checks, workflow lint, release, `ci`                                                                                |
+| `go-image.yml`      | Go plugins and services | version check, Go checks (`GOWORK=off`, recursive submodules), workflow lint, image build or release, `ci`                            |
+| `node-image.yml`    | api, frontend           | version check, Node checks in the Dockerfile's `toolchain` target, opt-in Playwright e2e, workflow lint, image build or release, `ci` |
+| `go-checks.yml`     | other workflows         | download, tidy, gofmt, vet, test, govulncheck in the pinned Go image                                                                  |
+| `image.yml`         | other workflows         | image build, or the native multi-arch release with provenance and GitHub release                                                      |
+| `version-check.yml` | other workflows         | on PRs to `main`, fails unless the version file is bumped                                                                             |
+| `workflow-lint.yml` | other workflows         | actionlint and zizmor over the caller's `.github/`, and the gitleaks secret scan                                                      |
+| `ci-report.yml`     | every caller            | on pushes to `main` or `develop`, keeps one `ci-failure` tracking issue per branch                                                    |
+| `codeql.yml`        | every caller            | CodeQL for Actions, and Go or JavaScript/TypeScript when asked, on every PR and push                                                  |
 
 ## Caller
 
@@ -128,6 +128,26 @@ node:
   #   target: ""        # Dockerfile target; empty builds the last stage, the default
 ```
 
+#### E2E (opt-in)
+
+Set `e2e-image` to add an `e2e` job beside `node checks`. A caller that leaves it empty, the default, gets a skipped `e2e` job and nothing else changes.
+
+| Input         | Default                     |                                                                                                     |
+| ------------- | --------------------------- | --------------------------------------------------------------------------------------------------- |
+| `e2e-image`   | `""`                        | Playwright image as `<image>:<tag>@sha256:<digest>`, matching the repo's `@playwright/test` version |
+| `e2e-command` | `pnpm exec playwright test` | run in the package directory after `pnpm install --frozen-lockfile`                                 |
+
+```yaml
+with:
+  e2e-image: mcr.microsoft.com/playwright:v1.65.1-noble@sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579
+  e2e-command: pnpm exec playwright test --workers=4
+```
+
+- The image stays in the caller, since it must move with the repo's `@playwright/test`; the job fails unless it is pinned by digest.
+- The job runs the command in that image with `CI=true` and its own pnpm store cache. Which projects run is the repo's Playwright config.
+- When it fails, it uploads `playwright-report/` and `test-results/` (screenshots, videos and traces, as the config records them) as the `e2e-report` artifact, kept 14 days.
+- `ci` and the release need it, so a failing suite fails `ci` and blocks the release; skipped counts as success.
+
 ## image.yml
 
 | Input        | Default                    |                                                               |
@@ -177,7 +197,7 @@ Release jobs run on pushes to `main` only when the repo variable `CI_RELEASE` is
 
 ## Testing
 
-`ci.yml` runs `go-library.yml` against `fixtures/go-library`, `go-image.yml` against `fixtures/go-image`, and `node-image.yml` against `fixtures/node-image` (amd64 builds, not pushed), which also lints this repo's workflows. Its `codeql` job runs `codeql.yml` over `fixtures/go-image`, the JavaScript fixture and the workflows. It passes `version-check: false`, since the fixtures never release: a `develop` -> `main` PR here needs no fixture version bump. Callers leave the input at its default, so their PRs to `main` must still bump the version.
+`ci.yml` runs `go-library.yml` against `fixtures/go-library`, `go-image.yml` against `fixtures/go-image`, and `node-image.yml` against `fixtures/node-image` twice, without and with `e2e-image` (amd64 builds, not pushed), which also lints this repo's workflows. Its `codeql` job runs `codeql.yml` over `fixtures/go-image`, the JavaScript fixture and the workflows. It passes `version-check: false`, since the fixtures never release: a `develop` -> `main` PR here needs no fixture version bump. Callers leave the input at its default, so their PRs to `main` must still bump the version.
 
 ## Moving `v1`
 
