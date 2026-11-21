@@ -45,6 +45,18 @@ jobs:
       working-directory: fixtures/node-image
       version-check: false
 
+  # The same fixture with the opt-in e2e job on; the call above leaves it off.
+  node-image-e2e:
+    uses: $/.github/workflows/node-image.yml
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    with:
+      working-directory: fixtures/node-image
+      version-check: false
+      e2e-image: mcr.microsoft.com/playwright:v1.65.1-noble@sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579
+
   # CodeQL over the fixtures and this repo's workflows; not in ci's needs, so findings never fail ci.
   codeql:
     uses: $/.github/workflows/codeql.yml
@@ -58,7 +70,7 @@ jobs:
   # The required check. Called workflow jobs show as "<caller> / <job>", so this one lives here.
   # Fails if any needed job failed or was cancelled; skipped counts as success.
   ci:
-    needs: [go-library, go-image, node-image]
+    needs: [go-library, go-image, node-image, node-image-e2e]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
