@@ -24,6 +24,7 @@ jobs:
       version-check: false
 
   # amd64 build only; release jobs stay skipped while CI_RELEASE is unset here.
+  # golangci-lint is on here and off in go-library, so both paths run.
   go-image:
     uses: $/.github/workflows/go-image.yml
     permissions:
@@ -33,6 +34,7 @@ jobs:
     with:
       working-directory: fixtures/go-image
       version-check: false
+      golangci-lint: true
 
   # Same for the Node image fixture.
   node-image:
