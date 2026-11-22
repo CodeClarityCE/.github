@@ -55,9 +55,9 @@ jobs:
             # Labels the repo lacks are created; existing ones are left as they are.
             labels=$(gh label list --limit 500 --json name --jq '.[].name')
             grep -qxF ci-failure <<<"$labels" ||
-              gh label create ci-failure --color B60205 --description "The CI required check failed on main or develop"
+              gh label create ci-failure --color B60205 --description "A CI or nightly check failed"
             grep -qxF needs-triage <<<"$labels" ||
-              gh label create needs-triage --color FBCA04 --description "Needs triage"
+              gh label create needs-triage --color 1D76DB --description "Maintainer needs to evaluate this issue"
 
             jobs=$(gh api --paginate "repos/$GH_REPO/actions/runs/$RUN_ID/attempts/$RUN_ATTEMPT/jobs" \
               --jq '.jobs[] | select(.conclusion == "failure" or .conclusion == "cancelled") | "- \u0060\(.name)\u0060: \(.conclusion)"')
