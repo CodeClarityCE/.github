@@ -1,0 +1,21 @@
+# Shared golangci-lint config for every CodeClarityCE Go repo.
+# go-checks.yml reads it at its own commit, so a caller on v1 gets v1's config.
+version: "2"
+
+run:
+  tests: true
+  # Paths relative to go.mod, wherever the config file lives.
+  relative-path-mode: gomod
+
+linters:
+  # Only these three; gofmt and go vet already run as their own steps.
+  default: none
+  enable:
+    - unused
+    - staticcheck
+    - gosec
+
+issues:
+  # Report every finding, not just the first few per linter.
+  max-issues-per-linter: 0
+  max-same-issues: 0

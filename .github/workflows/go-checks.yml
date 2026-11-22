@@ -1,4 +1,4 @@
-# Go checks in the pinned Go image: download, tidy, gofmt, vet, test, govulncheck.
+# Go checks in the pinned Go image: download, tidy, gofmt, vet, opt-in golangci-lint, test, govulncheck.
 # Shared by the Go library and Go image workflows.
 name: Go checks
 
@@ -17,6 +17,10 @@ on:
         description: Checkout submodules value (false, true or recursive).
         type: string
         default: "false"
+      golangci-lint:
+        description: Run golangci-lint with this repo's shared .golangci.yml (unused, staticcheck, gosec).
+        type: boolean
+        default: false
 
 permissions: {}
 
@@ -74,6 +78,31 @@ jobs:
           fi
       - name: go vet
         run: go vet ./...
+      - name: golangci-lint
+        if: inputs.golangci-lint
+        env:
+          FILE_PREFIX: ${{ steps.prefix.outputs.prefix }}
+          # The config comes from this workflow's own commit, so a caller on v1 gets v1's config.
+          CONFIG_REPO: ${{ job.workflow_repository }}
+          CONFIG_SHA: ${{ job.workflow_sha }}
+          # Keep in sync with the version in README.md.
+          GOLANGCI_LINT: github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/golangci.yml" \
+            "https://raw.githubusercontent.com/$CONFIG_REPO/$CONFIG_SHA/.golangci.yml"
+          status=0
+          go run "$GOLANGCI_LINT" run --config "$RUNNER_TEMP/golangci.yml" \
+            --output.text.print-issued-lines=false --output.text.colors=false ./... >"$RUNNER_TEMP/golangci.txt" || status=$?
+          cat "$RUNNER_TEMP/golangci.txt"
+          # One annotation per finding; paths in the output are relative to go.mod.
+          re='^([^:]+\.go):([0-9]+):([0-9]+): (.*)$'
+          while IFS= read -r line; do
+            if [[ "$line" =~ $re ]]; then
+              echo "::error file=$FILE_PREFIX${BASH_REMATCH[1]},line=${BASH_REMATCH[2]},col=${BASH_REMATCH[3]}::${BASH_REMATCH[4]}"
+            fi
+          done <"$RUNNER_TEMP/golangci.txt"
+          exit "$status"
       - name: go test
         run: go test -v ./...
       - name: govulncheck

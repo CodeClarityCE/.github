@@ -7,7 +7,7 @@ Central reusable GitHub Actions workflows for CodeClarityCE repos. Callers refer
 | `go-library.yml`    | Go utilities            | version check, Go checks, workflow lint, release, `ci`                                                                                |
 | `go-image.yml`      | Go plugins and services | version check, Go checks (`GOWORK=off`, recursive submodules), workflow lint, image build or release, `ci`                            |
 | `node-image.yml`    | api, frontend           | version check, Node checks in the Dockerfile's `toolchain` target, opt-in Playwright e2e, workflow lint, image build or release, `ci` |
-| `go-checks.yml`     | other workflows         | download, tidy, gofmt, vet, test, govulncheck in the pinned Go image                                                                  |
+| `go-checks.yml`     | other workflows         | download, tidy, gofmt, vet, opt-in golangci-lint, test, govulncheck in the pinned Go image                                            |
 | `image.yml`         | other workflows         | image build, or the native multi-arch release with provenance and GitHub release                                                      |
 | `version-check.yml` | other workflows         | on PRs to `main`, fails unless the version file is bumped                                                                             |
 | `workflow-lint.yml` | other workflows         | actionlint and zizmor over the caller's `.github/`, and the gitleaks secret scan                                                      |
@@ -108,6 +108,20 @@ go:
   #   target: plugin   # Dockerfile target, the default
 ```
 
+#### Go lint (opt-in)
+
+Set `golangci-lint: true` on a `go-library.yml` or `go-image.yml` call to add a `golangci-lint` step to `go checks`, after `go vet`. A caller that leaves it at `false`, the default, gets no new step.
+
+```yaml
+with:
+  golangci-lint: true
+```
+
+- It runs golangci-lint `v2.15.0` (`go run`, built with the pinned Go image) with this repo's `.golangci.yml`: only `unused`, `staticcheck` and `gosec`, every finding reported. The config is read at the commit of the workflow itself (`job.workflow_sha`), so a caller on `v1` gets `v1`'s config.
+- Any finding fails the step, and so `ci`, with one annotation per finding.
+- Run it locally from the module directory, as CI does: `GOWORK=off go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0 run --config <path to this repo>/.golangci.yml ./...` (drop `GOWORK=off` for a Go library).
+- A finding that is a false positive gets a `//nolint:<linter> // <why>` comment on its line, not a change to the shared config.
+
 ### Node image repos
 
 Image `codeclarityce/<name>` and version come from `package.json` (`name`, `version`); the git tag is `v<version>`. The job stages `.cloud/docker/pnpm-workspace.yaml` at the package root, builds the Dockerfile's `toolchain` target and runs each step in it with the pnpm store cached: `pnpm install --frozen-lockfile`, `pnpm lint:check`, `pnpm type-check`, the test command, the extra test command if set, and `pnpm exec prettier src --check`. Same permissions and secrets as the Go image call, and the same `ci` and `report` jobs after it:
@@ -201,7 +215,7 @@ Release jobs run on pushes to `main` only when the repo variable `CI_RELEASE` is
 
 ## Testing
 
-`ci.yml` runs `go-library.yml` against `fixtures/go-library`, `go-image.yml` against `fixtures/go-image`, and `node-image.yml` against `fixtures/node-image` twice, without and with `e2e-image` (amd64 builds, not pushed), which also lints this repo's workflows. Its `codeql` job runs `codeql.yml` over `fixtures/go-image`, the JavaScript fixture and the workflows. It passes `version-check: false`, since the fixtures never release: a `develop` -> `main` PR here needs no fixture version bump. Callers leave the input at its default, so their PRs to `main` must still bump the version.
+`ci.yml` runs `go-library.yml` against `fixtures/go-library`, `go-image.yml` against `fixtures/go-image` with `golangci-lint: true` (so both the on and off paths run), and `node-image.yml` against `fixtures/node-image` twice, without and with `e2e-image` (amd64 builds, not pushed), which also lints this repo's workflows. Its `codeql` job runs `codeql.yml` over `fixtures/go-image`, the JavaScript fixture and the workflows. It passes `version-check: false`, since the fixtures never release: a `develop` -> `main` PR here needs no fixture version bump. Callers leave the input at its default, so their PRs to `main` must still bump the version.
 
 ## Moving `v1`
 
