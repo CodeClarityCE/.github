@@ -14,7 +14,11 @@ Include what you can of:
 - the steps to reproduce, or a proof of concept
 - the impact you expect
 
-We will acknowledge the report, keep you updated while we work on a fix, and credit you in the published advisory unless you prefer otherwise.
+## What to expect
+
+- We acknowledge your report within 5 working days.
+- We keep you updated while we work on a fix.
+- We credit you in the published advisory unless you prefer otherwise.
 
 ## Supported versions
 

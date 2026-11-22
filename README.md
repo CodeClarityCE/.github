@@ -235,6 +235,10 @@ jobs:
 - A known dev key or test fixture is recorded in the repo's own `.gitleaksignore`, one fingerprint per line from the job's output, under a `#` comment saying why. A fingerprint from a commit scan is `<commit>:<file>:<rule>:<line>`; a working-tree one drops the commit.
 - The umbrella's pre-commit hook (`codeclarity-dev`'s `.githooks/`) runs the same version with a copy of `.gitleaks.toml`; its tests fail if the copy differs from this one at `v1`. Change the version here, in that hook and in the devcontainer together.
 
+## Community health files
+
+GitHub uses the files here for every org repo that has none of its own: `SECURITY.md` and the pull request template in `.github/pull_request_template.md`. They take effect from `main`, so a change reaches other repos only after `develop` merges to `main`. Code owners are not inherited: each repo keeps its own `.github/CODEOWNERS`.
+
 ## Releases
 
 Release jobs run on pushes to `main` only when the repo variable `CI_RELEASE` is `true`. They create the tag and release only if the tag does not exist yet, pinned to the built commit, as a prerelease for alpha or beta versions.
