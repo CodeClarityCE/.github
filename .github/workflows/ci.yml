@@ -1,4 +1,4 @@
-# The central repo's own CI: runs the Go library, Go image and Node image workflows
+# The central repo's own CI: runs the Go library, Go image, Node image and Go fuzz workflows
 # against their fixtures, which also lints this repo's workflows. The fixtures never
 # release, so their version check is off and develop -> main PRs need no version bump.
 name: CI
@@ -59,6 +59,16 @@ jobs:
       version-check: false
       e2e-image: mcr.microsoft.com/playwright:v1.65.1-noble@sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579
 
+  # Finds and runs the Go library fixture's fuzz target briefly; only schedules open issues.
+  go-fuzz:
+    uses: $/.github/workflows/go-fuzz.yml
+    permissions:
+      contents: read
+      issues: write
+    with:
+      working-directory: fixtures/go-library
+      fuzz-time: 10s
+
   # CodeQL over the fixtures and this repo's workflows; not in ci's needs, so findings never fail ci.
   codeql:
     uses: $/.github/workflows/codeql.yml
@@ -72,7 +82,7 @@ jobs:
   # The required check. Called workflow jobs show as "<caller> / <job>", so this one lives here.
   # Fails if any needed job failed or was cancelled; skipped counts as success.
   ci:
-    needs: [go-library, go-image, node-image, node-image-e2e]
+    needs: [go-library, go-image, node-image, node-image-e2e, go-fuzz]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
