@@ -162,6 +162,20 @@ with:
 - When it fails, it uploads `playwright-report/` and `test-results/` (screenshots, videos and traces, as the config records them) as the `e2e-report` artifact, kept 14 days.
 - `ci` and the release need it, so a failing suite fails `ci` and blocks the release; skipped counts as success.
 
+## Go test services
+
+The `go checks` job in `go-checks.yml`, so every `go-library.yml` and `go-image.yml` caller, starts Postgres and RabbitMQ as service containers, with the same images as the dev stack. The `go test` step gets their address and credentials in the variables the backend already reads, and `CI=true`:
+
+| Variable                                               | Value                          |
+| ------------------------------------------------------ | ------------------------------ |
+| `PG_DB_HOST`, `PG_DB_PORT`                             | `postgres`, `5432`             |
+| `PG_DB_USER`, `PG_DB_PASSWORD`                         | `postgres`, `postgres`         |
+| `AMQP_HOST`, `AMQP_PORT`, `AMQP_USER`, `AMQP_PASSWORD` | `rabbitmq`, `5672`, `ci`, `ci` |
+
+- Postgres starts with only the `postgres` database. A test creates what it needs, for instance a throwaway database per test.
+- Go tests get them through `github.com/CodeClarityCE/utility-boilerplates/testdeps`: `testdeps.Postgres(t)` returns a new empty database and drops it after the test, and `testdeps.RabbitMQ(t)` returns the AMQP URL. When the dependency is unreachable, the test fails if `CI` is set and skips otherwise, so a local run without the stack still passes and a green `ci` means the tests ran.
+- `fixtures/go-library` has a test that fails in this repo's CI when either service is unreachable.
+
 ## image.yml
 
 | Input        | Default                    |                                                               |

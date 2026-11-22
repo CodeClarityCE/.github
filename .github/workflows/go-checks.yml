@@ -34,6 +34,22 @@ jobs:
     # Keep in sync with the Dockerfiles and go.mod.
     container:
       image: golang:1.27.4@sha256:5e8afd493a7124a8586e134d9b532731161d4b9becf9dee5a5956b107426f93d
+    # Postgres and RabbitMQ for integration tests, reached by service name from the container.
+    # Keep in sync with the dev stack's images in codeclarity-dev's docker-compose.yaml.
+    services:
+      postgres:
+        image: postgres:18.6-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873
+        env:
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 20
+      rabbitmq:
+        image: rabbitmq:4.3.6-management-alpine@sha256:1aab4d911053f3ee4ff9bb231f5192ebd6a12281f8044910256a667fdb04108d
+        env:
+          RABBITMQ_DEFAULT_USER: ci
+          RABBITMQ_DEFAULT_PASS: ci
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping" --health-interval 5s --health-timeout 10s --health-retries 30
     env:
       GOTOOLCHAIN: local
       GOPRIVATE: github.com/CodeClarityCE/*
@@ -104,6 +120,17 @@ jobs:
           done <"$RUNNER_TEMP/golangci.txt"
           exit "$status"
       - name: go test
+        # With CI set, a test whose Postgres or RabbitMQ is unreachable fails instead of skipping.
+        env:
+          CI: "true"
+          PG_DB_HOST: postgres
+          PG_DB_PORT: "5432"
+          PG_DB_USER: postgres
+          PG_DB_PASSWORD: postgres
+          AMQP_HOST: rabbitmq
+          AMQP_PORT: "5672"
+          AMQP_USER: ci
+          AMQP_PASSWORD: ci
         run: go test -v ./...
       - name: govulncheck
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
