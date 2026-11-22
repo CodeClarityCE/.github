@@ -7,7 +7,7 @@ Central reusable GitHub Actions workflows for CodeClarityCE repos. Callers refer
 | `go-library.yml`    | Go utilities               | version check, Go checks, workflow lint, release, `ci`                                                                                |
 | `go-image.yml`      | Go plugins and services    | version check, Go checks (`GOWORK=off`, recursive submodules), workflow lint, image build or release, `ci`                            |
 | `node-image.yml`    | api, frontend              | version check, Node checks in the Dockerfile's `toolchain` target, opt-in Playwright e2e, workflow lint, image build or release, `ci` |
-| `go-checks.yml`     | other workflows            | download, tidy, gofmt, vet, opt-in golangci-lint, test, govulncheck in the pinned Go image                                            |
+| `go-checks.yml`     | other workflows, backend   | download, tidy, gofmt, vet, opt-in golangci-lint, test, govulncheck in the pinned Go image                                            |
 | `image.yml`         | other workflows            | image build, or the native multi-arch release with provenance and GitHub release                                                      |
 | `version-check.yml` | other workflows            | on PRs to `main`, fails unless the version file is bumped                                                                             |
 | `workflow-lint.yml` | other workflows            | actionlint and zizmor over the caller's `.github/`, and the gitleaks secret scan                                                      |
@@ -120,6 +120,7 @@ with:
 
 - It runs golangci-lint `v2.15.0` (`go run`, built with the pinned Go image) with this repo's `.golangci.yml`: only `unused`, `staticcheck` and `gosec`, every finding reported. The config is read at the commit of the workflow itself (`job.workflow_sha`), so a caller on `v1` gets `v1`'s config.
 - Any finding fails the step, and so `ci`, with one annotation per finding.
+- `golangci-lint-gowork-off: true` (on `go-checks.yml`) lints with `GOWORK=off` while every other step keeps the workspace, for a module such as the backend CLI that sits in a `go.work` but imports none of its modules.
 - Run it locally from the module directory, as CI does: `GOWORK=off go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0 run --config <path to this repo>/.golangci.yml ./...` (drop `GOWORK=off` for a Go library).
 - A finding that is a false positive gets a `//nolint:<linter> // <why>` comment on its line, not a change to the shared config.
 

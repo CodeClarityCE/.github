@@ -115,7 +115,8 @@ jobs:
           before=$(find "$corpus" -type f 2>/dev/null | sort || true)
           log="$RUNNER_TEMP/fuzz.log"
           status=0
-          go test -run '^$' -fuzz "^${TARGET}\$" -fuzztime "$FUZZ_TIME" "$PACKAGE" 2>&1 | tee "$log" || status=$?
+          # Minimizing a crash input defaults to 60s per input, which can stall a run.
+          go test -run '^$' -fuzz "^${TARGET}\$" -fuzztime "$FUZZ_TIME" -fuzzminimizetime 5s "$PACKAGE" 2>&1 | tee "$log" || status=$?
           if ((status == 0)); then
             exit 0
           fi
@@ -196,9 +197,9 @@ jobs:
 
           labels=$(gh label list --limit 500 --json name --jq '.[].name')
           grep -qxF ci-failure <<<"$labels" ||
-            gh label create ci-failure --color B60205 --description "The CI required check failed on main or develop"
+            gh label create ci-failure --color B60205 --description "A CI or nightly check failed"
           grep -qxF needs-triage <<<"$labels" ||
-            gh label create needs-triage --color FBCA04 --description "Needs triage"
+            gh label create needs-triage --color 1D76DB --description "Maintainer needs to evaluate this issue"
           open=$(gh issue list --label ci-failure --state open --limit 100 --json number,title,body)
 
           dirs=("$CRASHES"/fuzz-crash-*/)

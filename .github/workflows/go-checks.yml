@@ -21,6 +21,10 @@ on:
         description: Run golangci-lint with this repo's shared .golangci.yml (unused, staticcheck, gosec).
         type: boolean
         default: false
+      golangci-lint-gowork-off:
+        description: Run only golangci-lint with GOWORK=off, for a module in a workspace that imports none of it.
+        type: boolean
+        default: false
 
 permissions: {}
 
@@ -98,6 +102,7 @@ jobs:
         if: inputs.golangci-lint
         env:
           FILE_PREFIX: ${{ steps.prefix.outputs.prefix }}
+          GOWORK: ${{ (inputs.gowork-off || inputs.golangci-lint-gowork-off) && 'off' || '' }}
           # The config comes from this workflow's own commit, so a caller on v1 gets v1's config.
           CONFIG_REPO: ${{ job.workflow_repository }}
           CONFIG_SHA: ${{ job.workflow_sha }}
