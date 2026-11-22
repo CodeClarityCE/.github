@@ -2,17 +2,18 @@
 
 Central reusable GitHub Actions workflows for CodeClarityCE repos. Callers reference them at the moving `v1` tag; breaking changes go out as `v2`. Third-party actions and images are pinned by SHA or digest. See ADR 0009 in `codeclarity-dev`.
 
-| Workflow            | For                     | What it runs                                                                                                                          |
-| ------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `go-library.yml`    | Go utilities            | version check, Go checks, workflow lint, release, `ci`                                                                                |
-| `go-image.yml`      | Go plugins and services | version check, Go checks (`GOWORK=off`, recursive submodules), workflow lint, image build or release, `ci`                            |
-| `node-image.yml`    | api, frontend           | version check, Node checks in the Dockerfile's `toolchain` target, opt-in Playwright e2e, workflow lint, image build or release, `ci` |
-| `go-checks.yml`     | other workflows         | download, tidy, gofmt, vet, test, govulncheck in the pinned Go image                                                                  |
-| `image.yml`         | other workflows         | image build, or the native multi-arch release with provenance and GitHub release                                                      |
-| `version-check.yml` | other workflows         | on PRs to `main`, fails unless the version file is bumped                                                                             |
-| `workflow-lint.yml` | other workflows         | actionlint and zizmor over the caller's `.github/`, and the gitleaks secret scan                                                      |
-| `ci-report.yml`     | every caller            | on pushes to `main` or `develop`, keeps one `ci-failure` tracking issue per branch                                                    |
-| `codeql.yml`        | every caller            | CodeQL for Actions, and Go or JavaScript/TypeScript when asked, on every PR and push                                                  |
+| Workflow            | For                        | What it runs                                                                                                                          |
+| ------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `go-library.yml`    | Go utilities               | version check, Go checks, workflow lint, release, `ci`                                                                                |
+| `go-image.yml`      | Go plugins and services    | version check, Go checks (`GOWORK=off`, recursive submodules), workflow lint, image build or release, `ci`                            |
+| `node-image.yml`    | api, frontend              | version check, Node checks in the Dockerfile's `toolchain` target, opt-in Playwright e2e, workflow lint, image build or release, `ci` |
+| `go-checks.yml`     | other workflows            | download, tidy, gofmt, vet, test, govulncheck in the pinned Go image                                                                  |
+| `image.yml`         | other workflows            | image build, or the native multi-arch release with provenance and GitHub release                                                      |
+| `version-check.yml` | other workflows            | on PRs to `main`, fails unless the version file is bumped                                                                             |
+| `workflow-lint.yml` | other workflows            | actionlint and zizmor over the caller's `.github/`, and the gitleaks secret scan                                                      |
+| `ci-report.yml`     | every caller               | on pushes to `main` or `develop`, keeps one `ci-failure` tracking issue per branch                                                    |
+| `codeql.yml`        | every caller               | CodeQL for Actions, and Go or JavaScript/TypeScript when asked, on every PR and push                                                  |
+| `go-fuzz.yml`       | Go repos with fuzz targets | nightly Go native fuzzing of every `Fuzz` target, with a `ci-failure` issue per crash                                                 |
 
 ## Caller
 
@@ -181,6 +182,49 @@ With `release: false` it builds linux/amd64 without pushing, using the GitHub Ac
 - Pull requests from forks skip it, since their token cannot upload results.
 - GitHub rejects these uploads while CodeQL default setup is on, so repos that call it must have default setup off (the org's code security configuration keeps it off).
 
+## Go fuzz
+
+`go-fuzz.yml` runs Go native fuzzing outside the PR gate. A Go repo with `Fuzz` targets calls it from its own scheduled workflow, `.github/workflows/fuzz.yml`, beside `ci.yml`:
+
+```yaml
+# Nightly Go fuzzing from the central workflows; see CodeClarityCE/.github.
+name: Fuzz
+
+on:
+  schedule:
+    - cron: "23 2 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  fuzz:
+    uses: CodeClarityCE/.github/.github/workflows/go-fuzz.yml@v1
+    permissions:
+      contents: read
+      issues: write # the report job only
+    # with:
+    #   fuzz-time: 10m      # per target, the default
+    #   gowork-off: true    # for plugins and services, as in go-image.yml
+```
+
+| Input               | Default   |                                                                       |
+| ------------------- | --------- | --------------------------------------------------------------------- |
+| `working-directory` | `.`       | directory of the `go.mod`                                             |
+| `gowork-off`        | `false`   | set `GOWORK=off`                                                      |
+| `submodules`        | `"false"` | checkout `submodules` value                                           |
+| `fuzz-time`         | `10m`     | `go test -fuzztime` per target, such as `30s`, `10m`, `1h` or `5000x` |
+
+- The `fuzz targets` job lists every `Fuzz` function in every package of the module with `go test -list`, so a new target is fuzzed from the next night on with no change to the caller. Each target then runs as its own `fuzz <target>` job, in the same pinned Go image as `go-checks.yml`.
+- When a target fails, its job uploads the `fuzz-crash-<n>` artifact: the target, the log tail and the input `go test` wrote under `testdata/fuzz/<target>/`.
+- On a scheduled or manual run, the `report` job then opens one issue per target, titled `Fuzz crash in <target> (<package>)` and labelled `ci-failure` and `needs-triage`, or comments on the open one. The body holds the failing input and how to reproduce it. A failed run with no crash input, such as a build failure, opens `Fuzz run failing` instead. Runs on other events, such as this repo's own CI, never open issues.
+- To fix a crash, commit the input file at `testdata/fuzz/<target>/<name>` in the package with the fix. Plain `go test`, which `go-checks.yml` runs on every PR, runs every file there, so the crash stays fixed. Close the issue by hand once the fix is in.
+- Schedules run only on the default branch, so a new caller fuzzes once it reaches `main`; until then run it with `workflow_dispatch`.
+
 ## Secret scan
 
 `workflow-lint.yml` has a `secret scan` job, so every caller gets it with no change to its `ci.yml`. It runs gitleaks from the digest-pinned `GITLEAKS_IMAGE` with the rules in this repo's `.gitleaks.toml`, read at the commit of the workflow itself (`job.workflow_sha`), so a caller on `v1` gets `v1`'s rules.
@@ -197,7 +241,7 @@ Release jobs run on pushes to `main` only when the repo variable `CI_RELEASE` is
 
 ## Testing
 
-`ci.yml` runs `go-library.yml` against `fixtures/go-library`, `go-image.yml` against `fixtures/go-image`, and `node-image.yml` against `fixtures/node-image` twice, without and with `e2e-image` (amd64 builds, not pushed), which also lints this repo's workflows. Its `codeql` job runs `codeql.yml` over `fixtures/go-image`, the JavaScript fixture and the workflows. It passes `version-check: false`, since the fixtures never release: a `develop` -> `main` PR here needs no fixture version bump. Callers leave the input at its default, so their PRs to `main` must still bump the version.
+`ci.yml` runs `go-library.yml` against `fixtures/go-library`, `go-fuzz.yml` over the same fixture's `FuzzHello` for 10 seconds, `go-image.yml` against `fixtures/go-image`, and `node-image.yml` against `fixtures/node-image` twice, without and with `e2e-image` (amd64 builds, not pushed), which also lints this repo's workflows. Its `codeql` job runs `codeql.yml` over `fixtures/go-image`, the JavaScript fixture and the workflows. It passes `version-check: false`, since the fixtures never release: a `develop` -> `main` PR here needs no fixture version bump. Callers leave the input at its default, so their PRs to `main` must still bump the version.
 
 ## Moving `v1`
 
