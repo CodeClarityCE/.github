@@ -1,0 +1,234 @@
+# Go native fuzzing for a caller's nightly schedule: finds every Fuzz target in the module, runs
+# each for fuzz-time, and on a crash opens or comments on a ci-failure issue with the failing input.
+# Called from a scheduled caller workflow; see README.md.
+name: Go fuzz
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: Directory holding go.mod, relative to the repo root.
+        type: string
+        default: .
+      gowork-off:
+        description: Set GOWORK=off, as the image build does.
+        type: boolean
+        default: false
+      submodules:
+        description: Checkout submodules value (false, true or recursive).
+        type: string
+        default: "false"
+      fuzz-time:
+        description: How long each target is fuzzed, as a go test -fuzztime value such as 10m or 5000x.
+        type: string
+        default: 10m
+
+permissions: {}
+
+jobs:
+  targets:
+    name: fuzz targets
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    # Keep in sync with go-checks.yml.
+    container:
+      image: golang:1.27.4@sha256:5e8afd493a7124a8586e134d9b532731161d4b9becf9dee5a5956b107426f93d
+    env:
+      GOTOOLCHAIN: local
+      GOPRIVATE: github.com/CodeClarityCE/*
+      GOWORK: ${{ inputs.gowork-off && 'off' || '' }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+    outputs:
+      targets: ${{ steps.list.outputs.targets }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: ${{ inputs.submodules }}
+      - name: List fuzz targets
+        id: list
+        env:
+          FUZZ_TIME: ${{ inputs.fuzz-time }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${FUZZ_TIME:-}" && ! "$FUZZ_TIME" =~ ^[0-9]+(s|m|h|x)$ ]]; then
+            echo "::error::fuzz-time must look like 30s, 10m, 1h or 5000x, not '$FUZZ_TIME'"
+            exit 1
+          fi
+          # One {package, target, id} per Fuzz function, in every package that has tests.
+          targets=$(go list -f '{{if or .TestGoFiles .XTestGoFiles}}{{.ImportPath}}{{end}}' ./... |
+            while IFS= read -r pkg; do
+              if [[ -n "$pkg" ]]; then
+                go test -list '^Fuzz' -run '^$' "$pkg" | { grep '^Fuzz' || true; } |
+                  sed "s|^|$pkg |"
+              fi
+            done |
+            # The golang image has no jq; import paths and Go names need no JSON escaping.
+            awk 'BEGIN { printf "[" } { printf "%s{\"package\":\"%s\",\"target\":\"%s\",\"id\":%d}", (NR > 1 ? "," : ""), $1, $2, NR - 1 } END { print "]" }')
+          echo "targets=$targets" >>"$GITHUB_OUTPUT"
+          echo "Fuzz targets: $targets"
+          if [[ "$targets" == "[]" ]]; then
+            echo "::warning::No Fuzz targets found; nothing to fuzz."
+          fi
+
+  fuzz:
+    name: fuzz ${{ matrix.target }}
+    needs: [targets]
+    if: needs.targets.outputs.targets != '[]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.targets.outputs.targets) }}
+    # Keep in sync with go-checks.yml.
+    container:
+      image: golang:1.27.4@sha256:5e8afd493a7124a8586e134d9b532731161d4b9becf9dee5a5956b107426f93d
+    env:
+      GOTOOLCHAIN: local
+      GOPRIVATE: github.com/CodeClarityCE/*
+      GOWORK: ${{ inputs.gowork-off && 'off' || '' }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: ${{ inputs.submodules }}
+      - name: Fuzz
+        env:
+          PACKAGE: ${{ matrix.package }}
+          TARGET: ${{ matrix.target }}
+          FUZZ_TIME: ${{ inputs.fuzz-time }}
+          ARTIFACT: fuzz-crash-${{ matrix.id }}
+        run: |
+          set -uo pipefail
+          dir=$(go list -f '{{.Dir}}' "$PACKAGE")
+          corpus="$dir/testdata/fuzz/$TARGET"
+          before=$(find "$corpus" -type f 2>/dev/null | sort || true)
+          log="$RUNNER_TEMP/fuzz.log"
+          status=0
+          # Minimizing a crash input defaults to 60s per input, which can stall a run.
+          go test -run '^$' -fuzz "^${TARGET}\$" -fuzztime "$FUZZ_TIME" -fuzzminimizetime 5s "$PACKAGE" 2>&1 | tee "$log" || status=$?
+          if ((status == 0)); then
+            exit 0
+          fi
+          # The target, the log tail and any input go test wrote, for the report job.
+          crash="$GITHUB_WORKSPACE/fuzz-crash"
+          mkdir -p "$crash/inputs"
+          printf 'package=%s\ntarget=%s\n' "$PACKAGE" "$TARGET" >"$crash/target.txt"
+          tail -n 200 "$log" >"$crash/fuzz.log"
+          comm -13 <(printf '%s\n' "$before") <(find "$corpus" -type f 2>/dev/null | sort || true) |
+            while IFS= read -r f; do
+              if [[ -n "$f" ]]; then cp "$f" "$crash/inputs/"; fi
+            done
+          echo "::error::$TARGET in $PACKAGE failed; the failing input, if any, is in the $ARTIFACT artifact"
+          exit "$status"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure()
+        with:
+          name: fuzz-crash-${{ matrix.id }}
+          # Relative, so it resolves inside the container's workspace.
+          path: fuzz-crash
+          if-no-files-found: ignore
+          retention-days: 30
+
+  # Only scheduled and manual runs report, so a fixture run on a PR never opens issues.
+  report:
+    name: report
+    needs: [targets, fuzz]
+    if: >-
+      ${{ !cancelled()
+      && (needs.targets.result == 'failure' || needs.fuzz.result == 'failure')
+      && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      issues: write # create the labels, the issues and their comments
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: fuzz-crash-*
+          path: crashes
+      - name: Open or update the issues
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          CRASHES: crashes
+          SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          SERVER: ${{ github.server_url }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          run="[run $RUN_ID attempt $RUN_ATTEMPT]($SERVER/$GH_REPO/actions/runs/$RUN_ID/attempts/$RUN_ATTEMPT)"
+          commit="[\`${SHA:0:7}\`]($SERVER/$GH_REPO/commit/$SHA)"
+
+          # A code fence longer than any backtick run in the file, so its content cannot close it.
+          fence() {
+            local n
+            n=$(grep -o '`\+' "$1" | awk '{ if (length > m) m = length } END { print m + 1 }' || true)
+            ((n < 3)) && n=3
+            printf '`%.0s' $(seq "$n")
+          }
+          # The open ci-failure issue with this title or marker, if any.
+          find_issue() {
+            jq -r --arg t "$1" --arg m "$2" \
+              '[.[] | select(.title == $t or ((.body // "") | contains($m)))] | sort_by(.number) | first | .number // empty' <<<"$open"
+          }
+          post() {
+            local title=$1 marker=$2 body=$3 issue
+            issue=$(find_issue "$title" "$marker")
+            if [[ -n "$issue" ]]; then
+              gh issue comment "$issue" --body "$body"
+              echo "Commented on #$issue."
+            else
+              gh issue create --title "$title" --label ci-failure --label needs-triage --body "$body"
+            fi
+          }
+
+          labels=$(gh label list --limit 500 --json name --jq '.[].name')
+          grep -qxF ci-failure <<<"$labels" ||
+            gh label create ci-failure --color B60205 --description "A CI or nightly check failed"
+          grep -qxF needs-triage <<<"$labels" ||
+            gh label create needs-triage --color 1D76DB --description "Maintainer needs to evaluate this issue"
+          open=$(gh issue list --label ci-failure --state open --limit 100 --json number,title,body)
+
+          dirs=("$CRASHES"/fuzz-crash-*/)
+          if ((${#dirs[@]} == 0)); then
+            post "Fuzz run failing" "<!-- fuzz-run-failing -->" \
+              "$(printf '<!-- fuzz-run-failing -->\n\nThe nightly fuzz run failed at %s (%s) without a crash input, such as a build failure. See the run log.\n' "$commit" "$run")"
+            exit 0
+          fi
+
+          for d in "${dirs[@]}"; do
+            pkg=$(sed -n 's/^package=//p' "$d/target.txt")
+            target=$(sed -n 's/^target=//p' "$d/target.txt")
+            title="Fuzz crash in $target ($pkg)"
+            marker="<!-- fuzz-crash: $pkg $target -->"
+            body="$marker"$'\n\n'"\`$target\` in \`$pkg\` failed in the nightly fuzz run at $commit ($run)."$'\n\n'
+            inputs=("$d"inputs/*)
+            if ((${#inputs[@]} == 0)); then
+              body+="go test wrote no failing input (a build failure or a hang); see the log below."$'\n\n'
+            fi
+            for f in "${inputs[@]}"; do
+              name=$(basename "$f")
+              fc=$(fence "$f")
+              body+="Failing input \`$name\`:"$'\n\n'"$fc"$'\n'"$(head -c 4000 "$f")"$'\n'"$fc"$'\n\n'
+              body+="To reproduce, save it as \`testdata/fuzz/$target/$name\` in the package directory of \`$pkg\` and run \`go test -run '$target/$name' $pkg\`. "
+              body+="Commit that file with the fix: plain \`go test\` then runs it on every PR as a regression test."$'\n\n'
+            done
+            lc=$(fence "$d/fuzz.log")
+            body+="Last lines of the log:"$'\n\n'"$lc"$'\n'"$(tail -n 60 "$d/fuzz.log")"$'\n'"$lc"$'\n'
+            post "$title" "$marker" "$body"
+          done
