@@ -65,9 +65,11 @@ jobs:
             while IFS= read -r pkg; do
               if [[ -n "$pkg" ]]; then
                 go test -list '^Fuzz' -run '^$' "$pkg" | { grep '^Fuzz' || true; } |
-                  jq -R --arg pkg "$pkg" '{package: $pkg, target: .}'
+                  sed "s|^|$pkg |"
               fi
-            done | jq -sc 'to_entries | map(.value + {id: .key})')
+            done |
+            # The golang image has no jq; import paths and Go names need no JSON escaping.
+            awk 'BEGIN { printf "[" } { printf "%s{\"package\":\"%s\",\"target\":\"%s\",\"id\":%d}", (NR > 1 ? "," : ""), $1, $2, NR - 1 } END { print "]" }')
           echo "targets=$targets" >>"$GITHUB_OUTPUT"
           echo "Fuzz targets: $targets"
           if [[ "$targets" == "[]" ]]; then
