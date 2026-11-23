@@ -1,4 +1,4 @@
-# Go checks in the pinned Go image: download, tidy, gofmt, vet, test, govulncheck.
+# Go checks in the pinned Go image: download, tidy, gofmt, vet, opt-in golangci-lint, test, govulncheck.
 # Shared by the Go library and Go image workflows.
 name: Go checks
 
@@ -17,6 +17,14 @@ on:
         description: Checkout submodules value (false, true or recursive).
         type: string
         default: "false"
+      golangci-lint:
+        description: Run golangci-lint with this repo's shared .golangci.yml (unused, staticcheck, gosec).
+        type: boolean
+        default: false
+      golangci-lint-gowork-off:
+        description: Run only golangci-lint with GOWORK=off, for a module in a workspace that imports none of it.
+        type: boolean
+        default: false
 
 permissions: {}
 
@@ -30,6 +38,22 @@ jobs:
     # Keep in sync with the Dockerfiles and go.mod.
     container:
       image: golang:1.27.4@sha256:5e8afd493a7124a8586e134d9b532731161d4b9becf9dee5a5956b107426f93d
+    # Postgres and RabbitMQ for integration tests, reached by service name from the container.
+    # Keep in sync with the dev stack's images in codeclarity-dev's docker-compose.yaml.
+    services:
+      postgres:
+        image: postgres:18.6-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873
+        env:
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 20
+      rabbitmq:
+        image: rabbitmq:4.3.6-management-alpine@sha256:1aab4d911053f3ee4ff9bb231f5192ebd6a12281f8044910256a667fdb04108d
+        env:
+          RABBITMQ_DEFAULT_USER: ci
+          RABBITMQ_DEFAULT_PASS: ci
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping" --health-interval 5s --health-timeout 10s --health-retries 30
     env:
       GOTOOLCHAIN: local
       GOPRIVATE: github.com/CodeClarityCE/*
@@ -74,7 +98,44 @@ jobs:
           fi
       - name: go vet
         run: go vet ./...
+      - name: golangci-lint
+        if: inputs.golangci-lint
+        env:
+          FILE_PREFIX: ${{ steps.prefix.outputs.prefix }}
+          GOWORK: ${{ (inputs.gowork-off || inputs.golangci-lint-gowork-off) && 'off' || '' }}
+          # The config comes from this workflow's own commit, so a caller on v1 gets v1's config.
+          CONFIG_REPO: ${{ job.workflow_repository }}
+          CONFIG_SHA: ${{ job.workflow_sha }}
+          # Keep in sync with the version in README.md.
+          GOLANGCI_LINT: github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/golangci.yml" \
+            "https://raw.githubusercontent.com/$CONFIG_REPO/$CONFIG_SHA/.golangci.yml"
+          status=0
+          go run "$GOLANGCI_LINT" run --config "$RUNNER_TEMP/golangci.yml" \
+            --output.text.print-issued-lines=false --output.text.colors=false ./... >"$RUNNER_TEMP/golangci.txt" || status=$?
+          cat "$RUNNER_TEMP/golangci.txt"
+          # One annotation per finding; paths in the output are relative to go.mod.
+          re='^([^:]+\.go):([0-9]+):([0-9]+): (.*)$'
+          while IFS= read -r line; do
+            if [[ "$line" =~ $re ]]; then
+              echo "::error file=$FILE_PREFIX${BASH_REMATCH[1]},line=${BASH_REMATCH[2]},col=${BASH_REMATCH[3]}::${BASH_REMATCH[4]}"
+            fi
+          done <"$RUNNER_TEMP/golangci.txt"
+          exit "$status"
       - name: go test
+        # With CI set, a test whose Postgres or RabbitMQ is unreachable fails instead of skipping.
+        env:
+          CI: "true"
+          PG_DB_HOST: postgres
+          PG_DB_PORT: "5432"
+          PG_DB_USER: postgres
+          PG_DB_PASSWORD: postgres
+          AMQP_HOST: rabbitmq
+          AMQP_PORT: "5672"
+          AMQP_USER: ci
+          AMQP_PASSWORD: ci
         run: go test -v ./...
       - name: govulncheck
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...

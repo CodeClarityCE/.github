@@ -22,6 +22,10 @@ on:
         description: Fail PRs to main that do not bump the version. Off only for this repo's fixtures, which never release.
         type: boolean
         default: true
+      golangci-lint:
+        description: Run golangci-lint with the shared config; see go-checks.yml.
+        type: boolean
+        default: false
     # Passed on to image.yml for the release only.
     secrets:
       DOCKERHUB_USERNAME:
@@ -77,6 +81,7 @@ jobs:
       working-directory: ${{ inputs.working-directory }}
       gowork-off: true
       submodules: recursive
+      golangci-lint: ${{ inputs.golangci-lint }}
 
   lint:
     uses: $/.github/workflows/workflow-lint.yml
