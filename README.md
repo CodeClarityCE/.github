@@ -248,7 +248,7 @@ jobs:
 | `submodules`        | `"false"` | checkout `submodules` value                                           |
 | `fuzz-time`         | `10m`     | `go test -fuzztime` per target, such as `30s`, `10m`, `1h` or `5000x` |
 
-- The `fuzz targets` job lists every `Fuzz` function in every package of the module with `go test -list`, so a new target is fuzzed from the next night on with no change to the caller. Each target then runs as its own `fuzz <target>` job, in the same pinned Go image as `go-checks.yml`.
+- The `fuzz targets` job lists every `Fuzz` function in every package of the module with `go test -list`, so a new target is fuzzed from the next night on with no change to the caller. Each target then runs as its own `fuzz <target>` job, in the same pinned Go image as `go-checks.yml`. Both jobs set `GOFLAGS=-buildvcs=false`: the container user does not own the checkout, so git refuses it and `go list` on a main package would fail with `error obtaining VCS status`.
 - When a target fails, its job uploads the `fuzz-crash-<n>` artifact: the target, the log tail and the input `go test` wrote under `testdata/fuzz/<target>/`.
 - On a scheduled or manual run, the `report` job then opens one issue per target, titled `Fuzz crash in <target> (<package>)` and labelled `ci-failure` and `needs-triage`, or comments on the open one. The body holds the failing input and how to reproduce it. A failed run with no crash input, such as a build failure, opens `Fuzz run failing` instead. Runs on other events, such as this repo's own CI, never open issues.
 - To fix a crash, commit the input file at `testdata/fuzz/<target>/<name>` in the package with the fix. Plain `go test`, which `go-checks.yml` runs on every PR, runs every file there, so the crash stays fixed. Close the issue by hand once the fix is in.
@@ -274,7 +274,7 @@ Release jobs run on pushes to `main` only when the repo variable `CI_RELEASE` is
 
 ## Testing
 
-`ci.yml` runs `go-library.yml` against `fixtures/go-library`, `go-fuzz.yml` over the same fixture's `FuzzHello` for 10 seconds, `go-image.yml` against `fixtures/go-image` with `golangci-lint: true` (so both the on and off paths run), and `node-image.yml` against `fixtures/node-image` twice, without and with `e2e-image` (amd64 builds, not pushed), which also lints this repo's workflows. Its `codeql` job runs `codeql.yml` over `fixtures/go-image`, the JavaScript fixture and the workflows. It passes `version-check: false`, since the fixtures never release: a `develop` -> `main` PR here needs no fixture version bump. Callers leave the input at its default, so their PRs to `main` must still bump the version.
+`ci.yml` runs `go-library.yml` against `fixtures/go-library`, `go-fuzz.yml` over the same fixture's `FuzzHello` and over `fixtures/go-image`'s `FuzzGreeting` (a main package, as in plugins) for 10 seconds each, `go-image.yml` against `fixtures/go-image` with `golangci-lint: true` (so both the on and off paths run), and `node-image.yml` against `fixtures/node-image` twice, without and with `e2e-image` (amd64 builds, not pushed), which also lints this repo's workflows. Its `codeql` job runs `codeql.yml` over `fixtures/go-image`, the JavaScript fixture and the workflows. It passes `version-check: false`, since the fixtures never release: a `develop` -> `main` PR here needs no fixture version bump. Callers leave the input at its default, so their PRs to `main` must still bump the version.
 
 ## Moving `v1`
 
