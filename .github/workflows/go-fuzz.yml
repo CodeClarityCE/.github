@@ -39,6 +39,8 @@ jobs:
       GOTOOLCHAIN: local
       GOPRIVATE: github.com/CodeClarityCE/*
       GOWORK: ${{ inputs.gowork-off && 'off' || '' }}
+      # The container user does not own the checkout, so VCS stamping (go list on a main package) would fail.
+      GOFLAGS: -buildvcs=false
     defaults:
       run:
         shell: bash
@@ -95,6 +97,8 @@ jobs:
       GOTOOLCHAIN: local
       GOPRIVATE: github.com/CodeClarityCE/*
       GOWORK: ${{ inputs.gowork-off && 'off' || '' }}
+      # The container user does not own the checkout, so VCS stamping (go list on a main package) would fail.
+      GOFLAGS: -buildvcs=false
     defaults:
       run:
         shell: bash
