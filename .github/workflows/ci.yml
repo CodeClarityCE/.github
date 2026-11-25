@@ -69,6 +69,16 @@ jobs:
       working-directory: fixtures/go-library
       fuzz-time: 10s
 
+  # The same over the Go image fixture's main package, as in plugins, where go list stamps VCS info.
+  go-fuzz-main:
+    uses: $/.github/workflows/go-fuzz.yml
+    permissions:
+      contents: read
+      issues: write
+    with:
+      working-directory: fixtures/go-image
+      fuzz-time: 10s
+
   # CodeQL over the fixtures and this repo's workflows; not in ci's needs, so findings never fail ci.
   codeql:
     uses: $/.github/workflows/codeql.yml
@@ -82,7 +92,8 @@ jobs:
   # The required check. Called workflow jobs show as "<caller> / <job>", so this one lives here.
   # Fails if any needed job failed or was cancelled; skipped counts as success.
   ci:
-    needs: [go-library, go-image, node-image, node-image-e2e, go-fuzz]
+    needs:
+      [go-library, go-image, node-image, node-image-e2e, go-fuzz, go-fuzz-main]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
