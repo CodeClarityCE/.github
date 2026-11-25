@@ -259,7 +259,7 @@ jobs:
 The `workflow lint` job's `release callers` step runs `scripts/release-callers.sh`, read at the commit of the workflow itself (`job.workflow_sha`), over the caller's `.github/workflows/`. Every job that calls `go-image.yml` or `node-image.yml` must:
 
 - pass `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` by name under `secrets:` (`secrets: inherit` does not count), and
-- grant `contents: write`, `id-token: write` and `attestations: write` on that job.
+- grant `contents: write`, `id-token: write` and `attestations: write` on that job (`write-all` counts; the workflow-level `permissions:` does not).
 
 Otherwise the step fails, and so `ci`, with one annotation per job naming what is missing, such as `Job go calls go-image.yml without secrets: DOCKERHUB_TOKEN`. Without this check the gap shows only at the first real release on `main`. The step parses the workflows with yq from the digest-pinned `YQ_IMAGE`. Run it locally from a repo root with Docker: `YQ_IMAGE=<image from workflow-lint.yml> bash <path to this repo>/scripts/release-callers.sh`.
 

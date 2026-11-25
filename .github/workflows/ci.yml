@@ -126,7 +126,7 @@ jobs:
             echo "::error::release-callers.sh passed the broken fixture"
             exit 1
           fi
-          diff -u fixtures/release-callers/broken.expected "$RUNNER_TEMP/out.txt" | sed 's/^/  /'
+          diff -u fixtures/release-callers/broken.expected "$RUNNER_TEMP/out.txt" | sed 's/^/  /' || true
           cmp -s fixtures/release-callers/broken.expected "$RUNNER_TEMP/out.txt" || {
             echo "::error::release-callers.sh output differs from fixtures/release-callers/broken.expected"
             exit 1
