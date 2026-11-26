@@ -1,0 +1,37 @@
+# Callers that would fail at their first release; release-callers.sh must flag each job.
+name: CI
+
+on:
+  pull_request:
+
+permissions: {}
+
+jobs:
+  no-token:
+    uses: CodeClarityCE/.github/.github/workflows/go-image.yml@v1
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+
+  inherit:
+    uses: CodeClarityCE/.github/.github/workflows/node-image.yml@v1
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    secrets: inherit
+
+  read-only:
+    uses: CodeClarityCE/.github/.github/workflows/go-image.yml@v1
+    permissions:
+      contents: read
+      attestations: write
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+
+  bare:
+    uses: $/.github/workflows/node-image.yml

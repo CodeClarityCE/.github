@@ -1,4 +1,4 @@
-# Go checks in the pinned Go image: download, tidy, gofmt, vet, opt-in golangci-lint, test, govulncheck.
+# Go checks in the pinned Go image: download, tidy, gofmt, vet, golangci-lint, test, govulncheck.
 # Shared by the Go library and Go image workflows.
 name: Go checks
 
@@ -17,10 +17,6 @@ on:
         description: Checkout submodules value (false, true or recursive).
         type: string
         default: "false"
-      golangci-lint:
-        description: Run golangci-lint with this repo's shared .golangci.yml (unused, staticcheck, gosec).
-        type: boolean
-        default: false
       golangci-lint-gowork-off:
         description: Run only golangci-lint with GOWORK=off, for a module in a workspace that imports none of it.
         type: boolean
@@ -98,8 +94,8 @@ jobs:
           fi
       - name: go vet
         run: go vet ./...
+      # Always on, with this repo's shared .golangci.yml (unused, staticcheck, gosec).
       - name: golangci-lint
-        if: inputs.golangci-lint
         env:
           FILE_PREFIX: ${{ steps.prefix.outputs.prefix }}
           GOWORK: ${{ (inputs.gowork-off || inputs.golangci-lint-gowork-off) && 'off' || '' }}

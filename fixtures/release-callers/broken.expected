@@ -1,0 +1,4 @@
+::error file=fixtures/release-callers/broken/ci.yml,line=10::Job no-token calls go-image.yml without secrets: DOCKERHUB_TOKEN
+::error file=fixtures/release-callers/broken/ci.yml,line=19::Job inherit calls node-image.yml without secrets: DOCKERHUB_USERNAME, DOCKERHUB_TOKEN (pass both by name, not secrets: inherit)
+::error file=fixtures/release-callers/broken/ci.yml,line=27::Job read-only calls go-image.yml without permissions: contents: write, id-token: write
+::error file=fixtures/release-callers/broken/ci.yml,line=36::Job bare calls node-image.yml without secrets: DOCKERHUB_USERNAME, DOCKERHUB_TOKEN; permissions: contents: write, id-token: write, attestations: write

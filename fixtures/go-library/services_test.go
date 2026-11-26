@@ -20,6 +20,8 @@ func TestCIProvidesServices(t *testing.T) {
 			}
 			t.Fatalf("%s unreachable at %s in CI: %v", name, addr, err)
 		}
-		conn.Close()
+		if err := conn.Close(); err != nil {
+			t.Errorf("closing the %s connection: %v", name, err)
+		}
 	}
 }
