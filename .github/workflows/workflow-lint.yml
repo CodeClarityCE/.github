@@ -1,5 +1,6 @@
-# Lints the calling repo's workflows and Dependabot config with actionlint and zizmor, and scans the
-# commits under test for secrets with gitleaks and this repo's .gitleaks.toml.
+# Lints the calling repo's workflows and Dependabot config with actionlint and zizmor, checks that its
+# go-image and node-image callers can release, and scans the commits under test for secrets with
+# gitleaks and this repo's .gitleaks.toml.
 name: Workflow lint
 
 on:
@@ -12,6 +13,8 @@ env:
   ZIZMOR_IMAGE: ghcr.io/zizmorcore/zizmor:1.32.0@sha256:3014cc8f68f663935f69b3c3e0e41f5ce102b268d97db13db0f62208747f860d
   # The umbrella's pre-commit hook and devcontainer use the same version; keep them in sync.
   GITLEAKS_IMAGE: ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
+  # Keep in sync with the release-callers job in ci.yml.
+  YQ_IMAGE: mikefarah/yq:4.54.1@sha256:4b3d9475d65571d28cbb19544d3820ec2945e4c8b2f18279394282b8dc3a592e
 
 jobs:
   workflows:
@@ -52,6 +55,19 @@ jobs:
           EOF
           docker run --rm -e GH_TOKEN -v "$GITHUB_WORKSPACE:/repo:ro" -v "$RUNNER_TEMP/zizmor.yml:/zizmor.yml:ro" \
             -w /repo "$ZIZMOR_IMAGE" --config /zizmor.yml --format github .
+      - name: release callers
+        # Every go-image or node-image call must pass both Docker Hub secrets by name and grant
+        # contents, id-token and attestations write, or its first release fails.
+        if: ${{ !cancelled() }}
+        env:
+          # The script comes from this workflow's own commit, so a caller on v1 gets v1's check.
+          SCRIPT_REPO: ${{ job.workflow_repository }}
+          SCRIPT_SHA: ${{ job.workflow_sha }}
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/release-callers.sh" \
+            "https://raw.githubusercontent.com/$SCRIPT_REPO/$SCRIPT_SHA/scripts/release-callers.sh"
+          bash "$RUNNER_TEMP/release-callers.sh" .github/workflows
 
   secrets:
     name: secret scan

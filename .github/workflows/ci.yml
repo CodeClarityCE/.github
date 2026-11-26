@@ -31,6 +31,10 @@ jobs:
       contents: write
       id-token: write
       attestations: write
+    # Passed by name as every caller does; workflow lint checks it. Empty here, where nothing releases.
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
     with:
       working-directory: fixtures/go-image
       version-check: false
@@ -43,6 +47,10 @@ jobs:
       contents: write
       id-token: write
       attestations: write
+    # Passed by name as every caller does; workflow lint checks it. Empty here, where nothing releases.
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
     with:
       working-directory: fixtures/node-image
       version-check: false
@@ -54,6 +62,10 @@ jobs:
       contents: write
       id-token: write
       attestations: write
+    # Passed by name as every caller does; workflow lint checks it. Empty here, where nothing releases.
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
     with:
       working-directory: fixtures/node-image
       version-check: false
@@ -89,11 +101,50 @@ jobs:
       go-directory: fixtures/go-image
       javascript: true
 
+  # Workflow lint's release-callers check: the good caller fixture passes, the broken one fails on each job.
+  release-callers:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    env:
+      # Keep in sync with workflow-lint.yml.
+      YQ_IMAGE: mikefarah/yq:4.54.1@sha256:4b3d9475d65571d28cbb19544d3820ec2945e4c8b2f18279394282b8dc3a592e
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Good caller passes
+        run: bash scripts/release-callers.sh fixtures/release-callers/good
+      - name: Broken caller fails on each job
+        run: |
+          status=0
+          bash scripts/release-callers.sh fixtures/release-callers/broken >"$RUNNER_TEMP/out.txt" || status=$?
+          # Indented so the expected errors do not become annotations of this run.
+          sed 's/^/  /' "$RUNNER_TEMP/out.txt"
+          if [[ "$status" == 0 ]]; then
+            echo "::error::release-callers.sh passed the broken fixture"
+            exit 1
+          fi
+          diff -u fixtures/release-callers/broken.expected "$RUNNER_TEMP/out.txt" | sed 's/^/  /' || true
+          cmp -s fixtures/release-callers/broken.expected "$RUNNER_TEMP/out.txt" || {
+            echo "::error::release-callers.sh output differs from fixtures/release-callers/broken.expected"
+            exit 1
+          }
+
   # The required check. Called workflow jobs show as "<caller> / <job>", so this one lives here.
   # Fails if any needed job failed or was cancelled; skipped counts as success.
   ci:
     needs:
-      [go-library, go-image, node-image, node-image-e2e, go-fuzz, go-fuzz-main]
+      [
+        go-library,
+        go-image,
+        node-image,
+        node-image-e2e,
+        go-fuzz,
+        go-fuzz-main,
+        release-callers,
+      ]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
