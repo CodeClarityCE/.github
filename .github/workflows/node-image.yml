@@ -206,21 +206,27 @@ jobs:
           path: ${{ runner.temp }}/pnpm-store
           key: pnpm-store-e2e-${{ hashFiles(format('{0}/pnpm-lock.yaml', inputs.working-directory)) }}
           restore-keys: pnpm-store-e2e-
-      # Root in the container, since corepack enable writes to /usr; files go back to the runner user.
+      # Root in the container, since corepack enable writes to /usr/local/bin; files go back to the runner user.
       - name: Playwright
         env:
           CMD: ${{ inputs.e2e-command }}
+          # corepack 0.36.0 for npm ci, which installs it only when its sha512 matches.
+          COREPACK_PACKAGE: '{"private":true,"dependencies":{"corepack":"0.36.0"}}'
+          COREPACK_LOCK: '{"lockfileVersion":3,"requires":true,"packages":{"":{"dependencies":{"corepack":"0.36.0"}},"node_modules/corepack":{"version":"0.36.0","resolved":"https://registry.npmjs.org/corepack/-/corepack-0.36.0.tgz","integrity":"sha512-SiiJsBhZqdBiPHTEl6OT3sASrRrKIcYTQMsVGXx6EE/gM8WFMwYjeIX8Tt8RiU4Iv2J6LbT8KpGfCOsBpRWB/w==","bin":{"corepack":"dist/corepack.js","pnpm":"dist/pnpm.js","pnpx":"dist/pnpx.js","yarn":"dist/yarn.js","yarnpkg":"dist/yarnpkg.js"}}}}'
         run: |
           mkdir -p "$RUNNER_TEMP/pnpm-store"
           docker run --rm --ipc=host \
             -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" -v "$RUNNER_TEMP:$RUNNER_TEMP" \
             -w "$GITHUB_WORKSPACE/$PKG_DIR" -e CI=true -e COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
-            -e CMD -e WS="$GITHUB_WORKSPACE" -e STORE="$RUNNER_TEMP/pnpm-store" -e OWNER="$(id -u):$(id -g)" \
+            -e CMD -e COREPACK_PACKAGE -e COREPACK_LOCK -e WS="$GITHUB_WORKSPACE" -e STORE="$RUNNER_TEMP/pnpm-store" -e OWNER="$(id -u):$(id -g)" \
             "$E2E_IMAGE" bash -ec '
               restore() { chown -R "$OWNER" "$WS" "$STORE"; }
               trap restore EXIT
-              npm install -g corepack@0.36.0 --force >/dev/null
-              corepack enable
+              mkdir /tmp/corepack
+              printf "%s\n" "$COREPACK_PACKAGE" >/tmp/corepack/package.json
+              printf "%s\n" "$COREPACK_LOCK" >/tmp/corepack/package-lock.json
+              npm ci --prefix /tmp/corepack --ignore-scripts --no-audit --no-fund >/dev/null
+              /tmp/corepack/node_modules/.bin/corepack enable --install-directory /usr/local/bin
               pnpm install --frozen-lockfile --store-dir "$STORE"
               eval "$CMD"
             '
